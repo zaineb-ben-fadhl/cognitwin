@@ -1,0 +1,2 @@
+export const AI_CONSENT_TEXT = 'When enabled, aggregated exercise scores, evidence, your current message and up to six recent chat messages are sent through this server to Anthropic for coaching. Common identifiers are filtered, but avoid names and personal details in chat. Raw exercise trials, your profile nickname, camera images and camera measurements are not sent. Off = rule-based coaching on this device.';
+export const VOICE_OUTPUT_TEXT = 'Browser speech synthesis. A local voice is preferred; other voices may be processed by the browser provider.';

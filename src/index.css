@@ -1,0 +1,211 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/inter';
+
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+/*
+ * Design tokens. Dimension colours are the validated categorical slots 1–6
+ * (see docs/ARCHITECTURE.md § Visual design); dark mode uses its own validated steps.
+ */
+:root {
+  color-scheme: light;
+  --page: #f4f4f1;
+  --card: #fcfcfb;
+  --card-2: #efeee9;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #6f6d68;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --line: rgba(11, 11, 11, 0.1);
+  --brand: #6250d6;
+  --brand-ink: #ffffff;
+  --brand-soft: rgba(98, 80, 214, 0.1);
+  --good: #0ca30c;
+  --good-text: #006300;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+  --critical-text: #b42828;
+  --dim-attention: #2a78d6;
+  --dim-memory: #eb6834;
+  --dim-speed: #1baf7a;
+  --dim-inhibition: #eda100;
+  --dim-flexibility: #e87ba4;
+  --dim-reasoning: #008300;
+  /* Task stimuli: CVD-safe tones (blue / orange / charcoal). */
+  --tone-a: #2a78d6;
+  --tone-b: #eb6834;
+  --tone-c: #3d3d3a;
+  --diverge-up: #2a78d6;
+  --diverge-down: #eb6834;
+  --diverge-mid: #f0efec;
+  --seq-0: #efeee9;
+  --seq-4: #1c5cab;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme='light'])) {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --card: #1a1a19;
+    --card-2: #242423;
+    --ink: #f0efec;
+    --ink-2: #c3c2b7;
+    --muted: #9b9993;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --line: rgba(255, 255, 255, 0.1);
+    --brand: #9085e9;
+    --brand-ink: #0b0b0b;
+    --brand-soft: rgba(144, 133, 233, 0.14);
+    --good-text: #0ca30c;
+    --critical-text: #e66767;
+    --dim-attention: #3987e5;
+    --dim-memory: #d95926;
+    --dim-speed: #199e70;
+    --dim-inhibition: #c98500;
+    --dim-flexibility: #d55181;
+    --dim-reasoning: #008300;
+    --tone-a: #3987e5;
+    --tone-b: #d95926;
+    --tone-c: #d4d4d0;
+    --diverge-up: #3987e5;
+    --diverge-down: #d95926;
+    --diverge-mid: #383835;
+    --seq-0: #242423;
+    --seq-4: #6da7ec;
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --page: #0d0d0d;
+  --card: #1a1a19;
+  --card-2: #242423;
+  --ink: #f0efec;
+  --ink-2: #c3c2b7;
+  --muted: #9b9993;
+  --grid: #2c2c2a;
+  --axis: #383835;
+  --line: rgba(255, 255, 255, 0.1);
+  --brand: #9085e9;
+  --brand-ink: #0b0b0b;
+  --brand-soft: rgba(144, 133, 233, 0.14);
+  --good-text: #0ca30c;
+  --critical-text: #e66767;
+  --dim-attention: #3987e5;
+  --dim-memory: #d95926;
+  --dim-speed: #199e70;
+  --dim-inhibition: #c98500;
+  --dim-flexibility: #d55181;
+  --dim-reasoning: #008300;
+  --tone-a: #3987e5;
+  --tone-b: #d95926;
+  --tone-c: #d4d4d0;
+  --diverge-up: #3987e5;
+  --diverge-down: #d95926;
+  --diverge-mid: #383835;
+  --seq-0: #242423;
+  --seq-4: #6da7ec;
+}
+
+@theme inline {
+  --font-sans: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --color-page: var(--page);
+  --color-card: var(--card);
+  --color-card-2: var(--card-2);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-muted: var(--muted);
+  --color-grid: var(--grid);
+  --color-axis: var(--axis);
+  --color-line: var(--line);
+  --color-brand: var(--brand);
+  --color-brand-ink: var(--brand-ink);
+  --color-brand-soft: var(--brand-soft);
+  --color-good: var(--good);
+  --color-good-text: var(--good-text);
+  --color-warning: var(--warning);
+  --color-serious: var(--serious);
+  --color-critical: var(--critical);
+  --color-critical-text: var(--critical-text);
+}
+
+html {
+  font-size: calc(16px * var(--text-scale, 1));
+}
+
+body {
+  background: var(--page);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Reduced motion: user setting or OS preference. */
+[data-reduced-motion='true'] *,
+[data-reduced-motion='true'] *::before,
+[data-reduced-motion='true'] *::after {
+  animation-duration: 0.001ms !important;
+  transition-duration: 0.001ms !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.animate-fade-in {
+  animation: fade-in 0.25s ease-out both;
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 var(--brand-soft);
+  }
+  70% {
+    box-shadow: 0 0 0 10px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+.animate-pulse-ring {
+  animation: pulse-ring 1.6s infinite;
+}
+
+/* Recharts: keep chart chrome recessive and theme-aware. */
+.recharts-cartesian-grid line {
+  stroke: var(--grid);
+}
+.recharts-text {
+  fill: var(--muted);
+  font-size: 11px;
+}
+.recharts-cartesian-axis-line,
+.recharts-cartesian-axis-tick-line {
+  stroke: var(--axis);
+}
