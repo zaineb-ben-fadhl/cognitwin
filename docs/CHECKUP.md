@@ -39,7 +39,9 @@ A real request containing only a synthetic practice profile reached Anthropic. T
 - **Real camera and microphone / audible speech:** adapters were tested with simulated browser APIs. Physical-device operation and permissions still require a manual run.
 - **Visual application QA in Chrome/mobile:** native browser control stopped because it could not determine the current URL with enough confidence. The route tests use jsdom, not a rendered browser; responsive appearance, focus behaviour and real input timing therefore still need manual checks.
 - **Docker execution:** Docker's daemon was not running. The Dockerfile correction is in place, but no image build or container run is claimed.
-- **Public GitHub repository, hosted demo, 3–5 minute video and submission receipt:** absent or unverified. The user confirmed that the repository and video do not yet exist. No external publication or form submission was performed.
+- **Public GitHub repository:** https://github.com/zaineb-ben-fadhl/cognitwin, published 31 October 2026; the CI workflow passed on the first push.
+- **Demo video:** https://youtu.be/fU2qwyaGxMk (4:51, English captions), published 1 November 2026.
+- **Hosted demo and submission receipt:** absent or unverified. No form submission was performed from this machine.
 - **Eligibility/team details and the exact official dimension list:** not confirmed by the available materials. The supplied brief refers to a list without enumerating it.
 - **Scientific validation:** no real-user pilot, item calibration, construct validation or proof of real-life transfer is claimed.
 
