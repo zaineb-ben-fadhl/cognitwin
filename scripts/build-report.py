@@ -92,9 +92,9 @@ while i<len(lines):
 
 def footer(canvas, doc):
     canvas.saveState();canvas.setFont('Body',7.5);canvas.setFillColor(colors.HexColor('#5c6c7e'))
-    canvas.drawString(43,25,'CogniTwin | CISTAC 1.0 AI4Brain | revised 31 October 2026')
+    canvas.drawString(43,25,'CogniTwin | Zaineb Ben Fadhl, Rami Bouzid | CISTAC 1.0 AI4Brain | revised 1 November 2026')
     canvas.drawRightString(A4[0]-43,25,str(doc.page));canvas.restoreState()
 
 out=ROOT/'deliverables/CogniTwin-technical-report.pdf'
-SimpleDocTemplate(str(out),pagesize=A4,rightMargin=43,leftMargin=43,topMargin=36,bottomMargin=40,title='CogniTwin - technical report',author='CogniTwin project').build(story,onFirstPage=footer,onLaterPages=footer)
+SimpleDocTemplate(str(out),pagesize=A4,rightMargin=43,leftMargin=43,topMargin=36,bottomMargin=40,title='CogniTwin - technical report',author='Zaineb Ben Fadhl, Rami Bouzid').build(story,onFirstPage=footer,onLaterPages=footer)
 print(out)

@@ -2,6 +2,10 @@
 
 *Technical report — CISTAC 1.0, AI4Brain challenge*
 
+**Zaineb Ben Fadhl · Rami Bouzid**
+
+Code: github.com/zaineb-ben-fadhl/cognitwin · Demo video: youtu.be/fU2qwyaGxMk
+
 ## Abstract
 
 CogniTwin is a non-clinical cognitive growth agent that continuously assesses six cognitive dimensions, maintains a dynamic and historised *Brain Twin* of the user, coaches with explanations that can be checked, and adapts both exercises and learning plans. Its core is a deterministic engine with automated tests: a Bayesian item-response model over procedurally generated, language-free tasks gives every percentage an 80 % credible interval; computerised adaptive testing shortens assessment; a drifting state-space twin keeps uncertainty honest over time; and a transparent utility planner explains every recommendation. A rule-based coach — optionally rephrased by a large language model — narrates evidence-backed insights under guardrails that check clinical vocabulary, cited numeric evidence and certainty language. An AI Collaboration Score (0–100) with a documented, Beta-smoothed formula measures how well the user works with the AI. A simulation study with synthetic users of known ability shows ability recovery of r = 0.88–0.91 from a single 1–3 minute check-in, a 27–32 % error reduction from adaptive testing, honest interval coverage during learning (73 % vs 33 % for a static model), and cautious projections (89 % coverage of the 80 % band).
@@ -108,7 +112,7 @@ Because real participants were not available within the challenge, we validated 
 | Random pressing | 99 % detected, 0 % false alarms |
 | Collaboration archetypes | critical 75, new user 58, disengaged 44, over-reliant 41 |
 
-The 31 October 2026 local check-up passed 127 automated tests: engine, six exercise interfaces, pages, goals, privacy, import, storage, API and simulated camera/voice/provider failures. Typecheck, production build and simulations passed. Live LLM calls and real camera/microphone capture remain unverified. Browser visual automation was blocked by its URL-verification tool; Docker execution was unavailable because the daemon was stopped. A CI workflow is provided but no public CI run is claimed.
+The 31 October 2026 local check-up passed 127 automated tests: engine, six exercise interfaces, pages, goals, privacy, import, storage, API and simulated camera/voice/provider failures. Typecheck, production build and simulations passed. Live LLM calls and real camera/microphone capture remain unverified. Browser visual automation was blocked by its URL-verification tool; Docker execution was unavailable because the daemon was stopped. On the public repository, the CI workflow (typecheck, tests, simulation, docs check, production build) passed on 31 October 2026.
 
 ## 8. Limitations and future work
 

@@ -2,7 +2,7 @@
 
 **CISTAC 1.0 · AI4Brain challenge.** CogniTwin assesses six thinking skills with adaptive, language-free exercises, keeps a living **Brain Twin** that always says how sure it is, coaches with explanations you can check, and adapts every exercise and every daily plan to the learner. Non-clinical by design, local-first, runs without an external AI service when served locally or already loaded in a browser.
 
-▶ **[Watch the 4:51 demo video](https://youtu.be/fU2qwyaGxMk)** — recorded live from the app, English captions.
+▶ **[Watch the 4:51 demo video](https://youtu.be/fU2qwyaGxMk)** — recorded live from the app, English captions. · **Team:** Zaineb Ben Fadhl, Rami Bouzid
 
 ![Today dashboard](docs/screenshots/today.png)
 
@@ -140,7 +140,7 @@ docs/                architecture, dimensions, coach, collaboration score, ethic
 
 ## Credits
 
-Built for CISTAC 1.0 – AI4Brain (IEEE CIS / ENIS, Sfax). MIT licence. Face landmark model © Google (MediaPipe, Apache 2.0). Scientific references are listed in the Methods page and `docs/DIMENSIONS.md`.
+Built by **Zaineb Ben Fadhl** and **Rami Bouzid** for CISTAC 1.0 – AI4Brain (IEEE CIS / ENIS, Sfax). MIT licence. Face landmark model © Google (MediaPipe, Apache 2.0). Scientific references are listed in the Methods page and `docs/DIMENSIONS.md`.
 
 
 ## Local verification and remaining submission work
