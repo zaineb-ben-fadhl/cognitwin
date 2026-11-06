@@ -81,7 +81,7 @@ export function dimensionFacts(dim: DimensionId, input: ExplainInput, profile: D
         facts.push({
           chart: 'session_log',
           text: `in ${sessionName} your median response time ${pct > 0 ? 'rose' : 'fell'} ${r0(Math.abs(pct))} % (${r0(rtPrev)} → ${r0(rtNow)} ms) compared with your previous ${prev.length} session${prev.length > 1 ? 's' : ''}`,
-          evidence: ev(`Session log · ${d.short} median response time`, `${r0(rtPrev)} → ${r0(rtNow)} ms (${pct > 0 ? '+' : '−'}${r0(Math.abs(pct))} %)`, [r0(rtPrev), r0(rtNow), r0(Math.abs(pct))]),
+          evidence: ev(`Session log · ${d.short} median response time`, `${r0(rtPrev)} → ${r0(rtNow)} ms (${pct > 0 ? '+' : '−'}${r0(Math.abs(pct))} %) vs previous ${prev.length}`, [r0(rtPrev), r0(rtNow), r0(Math.abs(pct)), prev.length]),
           route: `${twinRoute}#session-log`,
           strength: 0.6 + Math.min(0.4, Math.abs(pct) / 40),
         });
@@ -171,7 +171,7 @@ export function dimensionFacts(dim: DimensionId, input: ExplainInput, profile: D
         (lowest ? ', your lowest area' : highest ? ', your highest area' : '') +
         (widest ? ', with the widest uncertainty ring' : '') +
         (asym && (asym.strong === dim || asym.weak === dim) ? ` — so it trains at ${TIER_LABEL[tier].toLowerCase()} difficulty, set from its own estimate` : ''),
-      evidence: ev(`Radar · ${d.short}`, `${r0(p.summary.score)} % (${r0(p.summary.lo)}–${r0(p.summary.hi)}, ±${half})`, [r0(p.summary.score), r0(p.summary.lo), r0(p.summary.hi), half]),
+      evidence: ev(`Radar · ${d.short}`, `${r0(p.summary.score)} % (80 % interval ${r0(p.summary.lo)}–${r0(p.summary.hi)}, ±${half})`, [r0(p.summary.score), 80, r0(p.summary.lo), r0(p.summary.hi), half]),
       route: '/',
       strength: 0.35 + (lowest || widest ? 0.2 : 0) + (asym && (asym.strong === dim || asym.weak === dim) ? 0.3 : 0),
     });
