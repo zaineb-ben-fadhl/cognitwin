@@ -1,18 +1,17 @@
-import { History, Table2, Trash2 } from 'lucide-react';
-import { useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Eye, History, MessageSquareWarning, Table2, Trash2, Undo2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import type { RadarEntry } from '@/components/charts/ProfileRadar';
-import { CalendarHeatmap, DimensionMatrix, type MatrixCell } from '@/components/charts/Heatmaps';
+import { CalendarHeatmap, DimensionMatrix } from '@/components/charts/Heatmaps';
 import { ProgressChart } from '@/components/charts/ProgressChart';
 import { DimLabel, dimColor } from '@/components/dim';
 import { ProfileView, toRadar } from '@/components/ProfileView';
 import { Badge, Button, Card, CardHeader, EmptyState, Modal, PageHeader, Toggle } from '@/components/ui';
-import { AFFECT_LABEL, DIMENSIONS, dimensionHistory, getDimension, modelFor, pSuccess, snapshotAt, type DimensionId, type SessionRecord, type TwinSnapshot } from '@/engine';
+import { AFFECT_LABEL, DIMENSIONS, DISPUTE_LABEL, dimensionHistory, getDimension, isMashedSession, timeOfDayMatrix, weeklyChangeMatrix, type DimensionId, type SessionRecord, type TwinSnapshot } from '@/engine';
 import { fmtDate, fmtDateTime } from '@/lib/format';
 import { useStore } from '@/store';
 import { useGoalStatuses, useNow, useProfile, useProjections } from '@/store/derived';
 
-const DAY = 86_400_000;
 
 function snapshotEntries(snap: TwinSnapshot | null, ids: DimensionId[]): RadarEntry[] {
   return ids.map((id) => {
@@ -22,63 +21,21 @@ function snapshotEntries(snap: TwinSnapshot | null, ids: DimensionId[]): RadarEn
   });
 }
 
-function weeklyChange(sessions: SessionRecord[], twin: ReturnType<typeof useStore.getState>['twin'], now: number, weeks = 8) {
-  const ids = DIMENSIONS.map((d) => d.id);
-  const columns: string[] = [];
-  const cells: MatrixCell[][] = ids.map(() => []);
-  for (let w = weeks - 1; w >= 0; w--) {
-    const end = now - w * 7 * DAY;
-    const start = end - 7 * DAY;
-    columns.push(fmtDate(start));
-    ids.forEach((id, ri) => {
-      const inWeek = sessions.filter((s) => s.dimension === id && s.endedAt > start && s.endedAt <= end);
-      if (!inWeek.length) return cells[ri].push({ value: null, label: 'no session' });
-      // The first-ever measurement is a baseline, not a change from the (arbitrary) starting prior.
-      const measuredBefore = sessions.some((s) => s.dimension === id && s.endedAt <= start);
-      if (!measuredBefore && inWeek.length === 1) return cells[ri].push({ value: null, label: 'baseline measurement', detail: `${Math.round(inWeek[0].scoreAfter.score)} %` });
-      const before = measuredBefore ? (snapshotAt(twin, start)?.dims[id]?.score ?? inWeek[0].scoreBefore.score) : inWeek[0].scoreAfter.score;
-      const after = snapshotAt(twin, end)?.dims[id]?.score ?? inWeek.at(-1)!.scoreAfter.score;
-      const d = after - before;
-      cells[ri].push({ value: d, label: `${d >= 0 ? '+' : ''}${d.toFixed(1)} pts`, detail: `${inWeek.length} session${inWeek.length > 1 ? 's' : ''}` });
-    });
-  }
-  return { ids, columns, cells };
-}
-
-function timeOfDay(sessions: SessionRecord[]) {
-  const ids = DIMENSIONS.map((d) => d.id);
-  const bands = ['Morning', 'Afternoon', 'Evening'];
-  const band = (s: SessionRecord) => {
-    const h = new Date(s.startedAt).getHours();
-    return h < 12 ? 0 : h < 18 ? 1 : 2;
-  };
-  const cells: MatrixCell[][] = ids.map((id) =>
-    bands.map((_, b) => {
-      const ss = sessions.filter((s) => s.dimension === id && s.trials.length && band(s) === b);
-      if (ss.length < 2) return { value: null, label: 'too few sessions' };
-      let k = 0;
-      let e = 0;
-      let n = 0;
-      for (const s of ss) {
-        for (const t of s.trials) {
-          k += t.success ? 1 : 0;
-          e += pSuccess(s.before.mean, t.level, modelFor(id));
-          n++;
-        }
-      }
-      const v = (100 * (k - e)) / n;
-      return { value: v, label: `${v >= 0 ? '+' : ''}${v.toFixed(1)} pts vs expected`, detail: `${ss.length} sessions, ${n} trials` };
-    }),
-  );
-  return { ids, bands, cells };
-}
-
 export default function TwinPage() {
   const now = useNow();
   const [params, setParams] = useSearchParams();
   const twin = useStore((s) => s.twin);
   const sessions = useStore((s) => s.sessions);
   const deleteSession = useStore((s) => s.deleteSession);
+  const disputeSession = useStore((s) => s.disputeSession);
+  const undisputeSession = useStore((s) => s.undisputeSession);
+  const location = useLocation();
+  // Deep links from the coach ("see the weekly heatmap") scroll to the chart.
+  useEffect(() => {
+    if (!location.hash) return;
+    const id = window.setTimeout(() => document.getElementById(location.hash.slice(1))?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
+    return () => clearTimeout(id);
+  }, [location.hash]);
   const profile = useProfile();
   const projections = useProjections();
   const goals = useGoalStatuses();
@@ -100,8 +57,11 @@ export default function TwinPage() {
     }
     return m;
   }, [sessions]);
-  const weekly = useMemo(() => weeklyChange(sessions, twin, now), [sessions, twin, now]);
-  const tod = useMemo(() => timeOfDay(sessions), [sessions]);
+  const weekly = useMemo(() => {
+    const m = weeklyChangeMatrix(sessions, twin, now);
+    return { ...m, columns: m.starts.map((t) => fmtDate(t)) };
+  }, [sessions, twin, now]);
+  const tod = useMemo(() => timeOfDayMatrix(sessions), [sessions]);
   const maxWeekly = Math.max(5, ...weekly.cells.flat().map((c) => Math.abs(c.value ?? 0)));
   const maxTod = Math.max(5, ...tod.cells.flat().map((c) => Math.abs(c.value ?? 0)));
 
@@ -205,22 +165,22 @@ export default function TwinPage() {
       </section>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
+        <Card id="calendar">
           <CardHeader title="Practice calendar" subtitle="Minutes per day, last 12 weeks" />
           <CalendarHeatmap minutesByDay={minutesByDay} now={now} />
         </Card>
         <Card>
           <CardHeader title="Best time of day" subtitle="Success compared with what the model expected (removes the effect of difficulty)" />
-          <DimensionMatrix rows={tod.ids} columns={tod.bands} cells={tod.cells} unit="points vs expected" maxAbs={maxTod} legendLow="below expected" legendHigh="above expected" />
+          <DimensionMatrix rows={tod.ids} columns={[...tod.bands]} cells={tod.cells} unit="points vs expected" maxAbs={maxTod} legendLow="below expected" legendHigh="above expected" />
         </Card>
       </div>
-      <Card>
+      <Card id="weekly-heatmap">
         <CardHeader title="Weekly change heatmap" subtitle="How much each estimate moved per week (blue = up, orange = down, grey = flat)" />
         <DimensionMatrix rows={weekly.ids} columns={weekly.columns} cells={weekly.cells} unit="score points per week" maxAbs={maxWeekly} legendLow="down" legendHigh="up" />
       </Card>
 
-      <Card>
-        <CardHeader title="Session log" subtitle="Full history. Deleting a session rebuilds the twin from the remaining ones." />
+      <Card id="session-log">
+        <CardHeader title="Session log" subtitle="Full history. Disputing a session halves its weight and widens its uncertainty; deleting one rebuilds the twin from the rest." />
         <div className="overflow-x-auto">
           <table className="w-full min-w-[640px] text-[13px]">
             <thead>
@@ -230,7 +190,7 @@ export default function TwinPage() {
                 <th className="py-2 font-medium">Type</th>
                 <th className="py-2 text-right font-medium">Trials</th>
                 <th className="py-2 text-right font-medium">Estimate</th>
-                <th className="py-2 font-medium">Quality</th>
+                <th className="py-2 pl-3 font-medium">Quality</th>
                 <th className="py-2 font-medium">State</th>
                 <th />
               </tr>
@@ -252,11 +212,28 @@ export default function TwinPage() {
                       <td className="py-2 text-right tabular">
                         {Math.round(s.scoreAfter.score)} % <span className="text-ink-2">({d >= 0 ? '+' : ''}{d.toFixed(1)})</span>
                       </td>
-                      <td className="py-2">
-                        <Badge tone={s.quality.reliability === 'good' ? 'good' : s.quality.reliability === 'fair' ? 'warn' : 'critical'}>{s.quality.reliability}</Badge>
+                      <td className="py-2 pl-3">
+                        <div className="flex flex-wrap gap-1">
+                          <Badge tone={s.quality.reliability === 'good' ? 'good' : s.quality.reliability === 'fair' ? 'warn' : 'critical'}>{s.quality.reliability}</Badge>
+                          {isMashedSession(s.quality) && <Badge tone="critical">rushed</Badge>}
+                          {s.dispute && <Badge tone="warn" className="cursor-help">disputed</Badge>}
+                          {s.format && <Badge tone="brand">{s.format}</Badge>}
+                        </div>
                       </td>
                       <td className="py-2 text-ink-2">{AFFECT_LABEL[s.affect.state]}</td>
-                      <td className="py-2 text-right">
+                      <td className="py-2 text-right whitespace-nowrap">
+                        <Link to={`/session/${s.taskId}?review=${s.id}`} aria-label="Review session" className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-ink-2 hover:bg-card-2">
+                          <Eye size={14} />
+                        </Link>
+                        {s.dispute ? (
+                          <Button size="sm" variant="ghost" aria-label="Undo dispute" title={`Disputed: ${DISPUTE_LABEL[s.dispute.reason]} — undo`} onClick={() => undisputeSession(s.id)}>
+                            <Undo2 size={14} />
+                          </Button>
+                        ) : (
+                          <Button size="sm" variant="ghost" aria-label="Dispute session" title="This doesn't reflect me (distraction)" onClick={() => disputeSession(s.id, 'distraction', { source: 'button' })}>
+                            <MessageSquareWarning size={14} />
+                          </Button>
+                        )}
                         <Button size="sm" variant="ghost" aria-label="Delete session" onClick={() => setConfirm(s)}>
                           <Trash2 size={14} />
                         </Button>

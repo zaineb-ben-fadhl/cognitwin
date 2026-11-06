@@ -128,6 +128,7 @@ docs/                architecture, dimensions, coach, collaboration score, ethic
 - [AI Collaboration Score](docs/COLLABORATION_SCORE.md)
 - [Ethics, consent & data](docs/ETHICS_AND_DATA.md)
 - [Validation report](docs/VALIDATION.md)
+- [Phase 2 surprise scenarios](docs/SURPRISE_SCENARIOS.md): button masher, plateau, "why" audit, pushback, fortune teller, asymmetrical mind. Reproducible in the in-app **Robustness lab**.
 - [Technical report](docs/TECHNICAL_REPORT.md)
 - [Pitch outline](docs/PITCH.md) · [Demo video script](docs/DEMO_VIDEO_SCRIPT.md)
 

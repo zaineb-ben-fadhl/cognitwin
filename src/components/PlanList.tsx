@@ -1,8 +1,8 @@
 import { clsx } from 'clsx';
 import { Check, ChevronDown, Play, Shuffle, SkipForward } from 'lucide-react';
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { DIMENSIONS, PLAN_WEIGHTS, getDimension, type DailyPlan, type PlanItem } from '@/engine';
+import { useMemo, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { CHART_LABEL, DIMENSIONS, PLAN_WEIGHTS, TIER_LABEL, TRAINING_FORMATS, dimensionFacts, getDimension, type DailyPlan, type PlanItem } from '@/engine';
 import { useStore } from '@/store';
 import { DimLabel } from './dim';
 import { Badge, Button, Modal } from './ui';
@@ -16,7 +16,37 @@ const FACTOR_LABEL: Record<string, string> = {
   variety: 'Variety',
   preference: 'Your focus',
   fatigue: 'Rotation',
+  plateau: 'Plateau',
+  asymmetry: 'Asymmetry',
 };
+
+/** Chart-backed facts behind the item: what the Brain Twin shows, with a link to each chart. */
+function DataFacts({ item }: { item: PlanItem }) {
+  const twin = useStore((s) => s.twin);
+  const sessions = useStore((s) => s.sessions);
+  const goals = useStore((s) => s.goals);
+  const settings = useStore((s) => s.settings);
+  const facts = useMemo(
+    () => dimensionFacts(item.dimension, { twin, sessions, goals, prefs: { dailyMinutes: settings.dailyMinutes, challenge: settings.challenge, focus: settings.focus }, now: Date.now() }).slice(0, 4),
+    [item.dimension, twin, sessions, goals, settings.dailyMinutes, settings.challenge, settings.focus],
+  );
+  if (!facts.length) return null;
+  return (
+    <div className="mt-2 space-y-1 border-t border-line pt-2">
+      <div className="text-[11.5px] font-semibold uppercase tracking-wide text-ink-2">What your Brain Twin shows</div>
+      <ul className="space-y-1">
+        {facts.map((f) => (
+          <li key={f.evidence.id} className="text-[12.5px]">
+            <Link to={f.route} className="font-medium text-brand">
+              {CHART_LABEL[f.chart]}
+            </Link>
+            <span className="text-ink-2"> — {f.text.charAt(0).toUpperCase() + f.text.slice(1)}.</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 function ReasonBars({ item }: { item: PlanItem }) {
   const max = Math.max(...Object.values(PLAN_WEIGHTS));
@@ -36,6 +66,8 @@ function ReasonBars({ item }: { item: PlanItem }) {
           <span className="col-span-3 -mt-1 text-[12px] text-ink-2">{r.text}</span>
         </div>
       ))}
+      {item.formatNote && <p className="pt-1 text-[12px] text-ink-2">{item.formatNote}</p>}
+      <DataFacts item={item} />
       <p className="pt-1 text-[11.5px] text-muted">Contribution = feature value (0–1) × weight. Weights are documented in Methods.</p>
     </div>
   );
@@ -111,6 +143,8 @@ export function PlanList({ plan, showChanges = true }: { plan: DailyPlan; showCh
               <DimLabel id={item.dimension} />
               <span className="text-[13px] text-ink-2">{d.task.name}</span>
               <Badge tone={item.mode === 'assessment' ? 'brand' : 'neutral'}>{item.mode === 'assessment' ? 'Check-in' : `Training · from level ${item.level}`}</Badge>
+              {item.mode === 'training' && item.tier && item.tier !== 'core' && <Badge tone={item.tier === 'advanced' ? 'good' : 'warn'}>{TIER_LABEL[item.tier]}</Badge>}
+              {item.mode === 'training' && item.format && item.format !== 'standard' && <Badge tone="brand">{TRAINING_FORMATS[item.format].name} format</Badge>}
               <span className="text-[12px] text-ink-2">~{item.minutes} min</span>
               {item.userEdited && <Badge>edited by you</Badge>}
               <div className="ml-auto flex items-center gap-1">
@@ -140,7 +174,7 @@ export function PlanList({ plan, showChanges = true }: { plan: DailyPlan; showCh
                     variant="primary"
                     onClick={() => {
                       logEvent('recommendation_response', { response: 'accepted', confidence: item.mode === 'assessment' ? 'low' : 'moderate', evidenceViewed: expanded });
-                      navigate(`/session/${item.taskId}?mode=${item.mode}&plan=${item.id}`);
+                      navigate(`/session/${item.taskId}?mode=${item.mode}&plan=${item.id}${item.format && item.format !== 'standard' ? `&format=${item.format}` : ''}`);
                     }}
                   >
                     <Play size={13} /> Start

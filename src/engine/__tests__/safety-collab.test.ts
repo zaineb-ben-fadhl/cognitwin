@@ -43,7 +43,7 @@ describe('guardrails', () => {
   it('blocks ungrounded numbers and certainty language', () => {
     const r = checkMessage('You will definitely reach 93 % next week.', { allowedNumbers: [58, 64] });
     expect(r.ok).toBe(false);
-    expect(r.violations.map((v) => v.rule).sort()).toEqual(['certainty', 'grounding']);
+    expect(r.violations.map((v) => v.rule).sort()).toEqual(['certainty', 'forecast', 'grounding']);
     expect(checkMessage('Your score is 58 % (interval 51–64).', { allowedNumbers: [58, 51, 64] }).ok).toBe(true);
   });
 
@@ -94,8 +94,10 @@ describe('data quality', () => {
     const user: SimUser = { theta: {}, growth: {}, rtScale: 1, lapseRate: 0, interruptRate: 0, randomResponder: true };
     const res = simulateRun(task, user, { mode: 'training', prior: { mean: 0, sd: 1 }, ability: 0, rng: createRng(2), startedAt: 0 });
     const q = assessQuality(task, res.trials, res.behaviour);
-    expect(q.flags.map((f) => f.kind)).toContain('random_responding');
+    // Fast near-chance pressing is caught either as rapid guessing or as random responding.
+    expect(q.flags.some((f) => f.kind === 'random_responding' || f.kind === 'rapid_guessing')).toBe(true);
     expect(q.weight).toBeLessThanOrEqual(0.5);
+    expect(q.uncertaintyInflation).toBeGreaterThan(0);
   });
 });
 

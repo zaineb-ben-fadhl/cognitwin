@@ -1,7 +1,7 @@
-import type { Confidence, DimensionId, Evidence, SessionMode } from '../types';
+import type { Confidence, DimensionId, Evidence, SessionMode, TrainingFormat } from '../types';
 
 export type CoachAction =
-  | { kind: 'start_session'; taskId: string; mode: SessionMode; label: string }
+  | { kind: 'start_session'; taskId: string; mode: SessionMode; label: string; format?: TrainingFormat }
   | { kind: 'create_goal'; dimension: DimensionId; target: number; deadlineDays: number; label: string }
   | { kind: 'take_break'; minutes: number; label: string }
   | { kind: 'open'; route: string; label: string };

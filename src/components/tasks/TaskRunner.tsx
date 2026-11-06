@@ -3,9 +3,9 @@
  * timing, scoring, feedback, interruption detection, pause/quit and live strain easing.
  */
 import { clsx } from 'clsx';
-import { Check, Pause, Play, X } from 'lucide-react';
+import { Bot, Check, Pause, Play, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ANTICIPATION_MS, createRng, liveStrain, type AdaptiveSession, type AnyTaskSpec, type BehaviourLog, type Trial } from '@/engine';
+import { ANTICIPATION_MS, createRng, isRapid, liveRapidGuessing, liveStrain, median, type AdaptiveSession, type AnyTaskSpec, type BehaviourLog, type RushAnswer, type Trial } from '@/engine';
 import { speak } from '@/lib/voice';
 import { Button, ProgressBar } from '../ui';
 import { TASK_MODULES } from './index';
@@ -65,6 +65,9 @@ export function TaskRunner({ task, adaptive, practiceTrials = 0, deadlineFactor,
   const [feedback, setFeedback] = useState<{ ok: boolean; text?: string } | null>(null);
   const [paused, setPaused] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  /** Live coach check-in after a burst of implausibly fast, mostly wrong answers. */
+  const [rushPrompt, setRushPrompt] = useState<string | null>(null);
+  const lastRushAt = useRef<number | null>(null);
   const pausedRef = useRef(false);
   pausedRef.current = paused;
 
@@ -187,6 +190,21 @@ export function TaskRunner({ task, adaptive, practiceTrials = 0, deadlineFactor,
         }
       }
 
+      // Button-masher guard: ask, don't judge. At most twice per session, eight trials apart.
+      if (!practice && (lastRushAt.current === null || trials.current.length - lastRushAt.current >= 8) && (behaviour.current.rushChecks?.length ?? 0) < 2 && liveRapidGuessing(task, trials.current)) {
+        lastRushAt.current = trials.current.length;
+        const recent = trials.current.slice(-6).filter((t) => t.rtMs !== null);
+        const med = median(recent.map((t) => t.rtMs)) ?? 0;
+        const wrong = recent.filter((t) => !t.correct).length;
+        const fast = recent.filter((t) => isRapid(task, t)).length;
+        setRushPrompt(
+          `Your last ${recent.length} answers came in at a median ${Math.round(med)} ms${fast ? ` (${fast} faster than the screen can be read)` : ''} and ${wrong} ${wrong === 1 ? 'was' : 'were'} wrong. ` +
+            'I won’t count rushed answers as a drop in ability — but are you distracted, or rushing?',
+        );
+        setPaused(true);
+        if (voice) speak('Quick check: are you distracted, or rushing?');
+      }
+
       const showCorrectness = practice || adaptive?.mode === 'training';
       setFeedback({ ok: success, text: showCorrectness && !success ? module.explainError?.(current.stim, response) : undefined });
       setPhase('feedback');
@@ -214,6 +232,22 @@ export function TaskRunner({ task, adaptive, practiceTrials = 0, deadlineFactor,
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paused]);
+
+  const answerRush = (answer: RushAnswer) => {
+    behaviour.current.rushChecks = [...(behaviour.current.rushChecks ?? []), { at: Date.now(), answer }];
+    setRushPrompt(null);
+    if (answer === 'stop') {
+      if (ended.current) return;
+      ended.current = true;
+      window.clearTimeout(transition.current);
+      const r = result();
+      r.behaviour.quitEarly = true;
+      onQuit(r);
+      return;
+    }
+    // "Distracted" keeps the session paused until the user is ready.
+    if (answer !== 'distracted') setPaused(false);
+  };
 
   const View = module.View;
   const showCorrectness = practice || adaptive?.mode === 'training';
@@ -253,7 +287,30 @@ export function TaskRunner({ task, adaptive, practiceTrials = 0, deadlineFactor,
       </div>
 
       <div className="relative flex flex-1 items-center justify-center rounded-2xl border border-line bg-page/60 px-3 py-6 sm:px-6">
-        {paused ? (
+        {paused && rushPrompt ? (
+          <div className="flex max-w-md flex-col items-center gap-3 text-center" role="alertdialog" aria-label="Coach check-in">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-soft text-brand">
+              <Bot size={20} />
+            </span>
+            <div className="text-sm font-semibold">Quick check from your coach</div>
+            <p className="text-[13.5px] text-ink-2">{rushPrompt}</p>
+            <div className="flex flex-wrap justify-center gap-2">
+              <Button variant="primary" size="sm" onClick={() => answerRush('rushing')}>
+                I was rushing — I’ll slow down
+              </Button>
+              <Button size="sm" onClick={() => answerRush('distracted')}>
+                I’m distracted — pause
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => answerRush('continue')}>
+                Keep going
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => answerRush('stop')}>
+                Stop here
+              </Button>
+            </div>
+            <p className="text-[11.5px] text-muted">Answers this fast can’t be based on what was on screen, so they are left out of your estimate whatever you choose.</p>
+          </div>
+        ) : paused ? (
           <div className="flex flex-col items-center gap-3 text-center">
             <div className="text-sm font-semibold">Paused</div>
             <p className="max-w-xs text-[13px] text-ink-2">Completed results are kept. The current item restarts on resume and counts less because it was interrupted.</p>

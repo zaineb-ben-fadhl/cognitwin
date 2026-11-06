@@ -8,7 +8,7 @@ import { PlanList } from '@/components/PlanList';
 import { ProfileView, toRadar } from '@/components/ProfileView';
 import { Button, Card, CardHeader, EmptyState, IntervalBar, PageHeader, ProgressBar, Segmented } from '@/components/ui';
 import type { RadarEntry } from '@/components/charts/ProfileRadar';
-import { dailyBriefing, daysSinceActivity, localDate, snapshotAt } from '@/engine';
+import { TIER_LABEL, asymmetrySentence, dailyBriefing, daysSinceActivity, detectAsymmetry, getDimension, localDate, snapshotAt } from '@/engine';
 import { useCollab, useGoalStatuses, useInsights, useNow, useProfile } from '@/store/derived';
 import { useStore } from '@/store';
 import { fmtDate } from '@/lib/format';
@@ -55,6 +55,8 @@ export default function TodayPage() {
     else if (d > 0) break;
   }
   const fresh = sessions.length === 0;
+  const asym = useMemo(() => detectAsymmetry(profile), [profile]);
+  const splitItems = asym && plan ? plan.items.filter((i) => i.dimension === asym.strong || i.dimension === asym.weak) : [];
   const activeGoals = goals.filter((g) => !g.goal.archived);
 
   return (
@@ -102,7 +104,26 @@ export default function TodayPage() {
               />
             }
           />
-          <ProfileView entries={toRadar(profile)} compare={compare} compareLabel={compareDays ? `${compareDays === 7 ? '1 week' : '4 weeks'} ago` : undefined} profile={profile} />
+          <ProfileView entries={toRadar(profile)} compare={compare} compareLabel={compareDays ? `${compareDays === 7 ? '1 week' : '4 weeks'} ago` : undefined} profile={profile} split={asym ?? undefined} />
+          {asym && (
+            <div className="mt-3 rounded-xl border border-line bg-card-2/60 p-3 text-[12.5px]">
+              <div className="font-semibold text-ink">Asymmetric profile — difficulty is set per area, never averaged</div>
+              <p className="mt-0.5 text-ink-2">{asymmetrySentence(asym)}: the intervals do not overlap, so this is a real split, not noise.</p>
+              {splitItems.length > 0 && (
+                <ul className="mt-1.5 space-y-0.5">
+                  {splitItems.map((i) => (
+                    <li key={i.id}>
+                      <span className="font-medium">{getDimension(i.dimension).short}</span>
+                      <span className="text-ink-2">
+                        {' '}
+                        — {i.mode === 'training' ? `${TIER_LABEL[i.tier ?? 'core']} · level ${i.level} of 10 · target ≈ ${Math.round((i.targetSuccess ?? 0.8) * 100)} % success` : 'check-in first'}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
         </Card>
 
         <Card className="lg:col-span-2">

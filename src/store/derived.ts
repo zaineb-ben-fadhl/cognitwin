@@ -90,6 +90,8 @@ export function useCoachContext(): CoachContext {
   const goals = useGoalStatuses();
   const plans = useStore((s) => s.plans);
   const sessions = useStore((s) => s.sessions);
+  const twin = useStore((s) => s.twin);
+  const settings = useStore((s) => s.settings);
   const nickname = useStore((s) => s.profile.nickname);
   const llm = useStore((s) => s.consent.llm);
   const now = useNow();
@@ -105,7 +107,14 @@ export function useCoachContext(): CoachContext {
       projections,
       recentSessions: sessions.slice(-5),
       llmEnabled: llm,
+      twin,
+      sessions,
+      prefs: { dailyMinutes: settings.dailyMinutes, challenge: settings.challenge, focus: settings.focus },
+      projectAt: (dim: DimensionId, days: number) => {
+        const r = project(dimensionHistory(twin, dim), modelFor(dim), now, days);
+        return r.ok ? r.projection : null;
+      },
     }),
-    [now, nickname, profile, insights, plans, goals, collab, projections, sessions, llm],
+    [now, nickname, profile, insights, plans, goals, collab, projections, sessions, llm, twin, settings.dailyMinutes, settings.challenge, settings.focus],
   );
 }

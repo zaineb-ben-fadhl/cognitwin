@@ -5,6 +5,9 @@
  */
 import { AFFECT_LABEL } from './affect';
 import { getDimension } from './dimensions';
+import { TRAINING_FORMATS, detectPlateau, nextFormat } from './formats';
+import { isMashedSession } from './quality';
+import { detectAsymmetry } from './tiers';
 import { metric } from './metrics';
 import { median } from './stats';
 import { currentProfile, dimensionHistory, modelFor, snapshotAt } from './twin';
@@ -28,6 +31,7 @@ export function sessionInsights(session: SessionRecord, previous?: SessionRecord
   const dim = session.dimension;
   const name = short(dim);
   const delta = session.scoreAfter.score - session.scoreBefore.score;
+  const mashed = isMashedSession(session.quality);
   const n = session.trials.length;
   // A noisy session cannot support a confident statement, whatever the interval says.
   const capped = (c: Confidence): Confidence =>
@@ -35,10 +39,15 @@ export function sessionInsights(session: SessionRecord, previous?: SessionRecord
 
   out.push({
     id: `${session.id}-delta`,
-    kind: delta >= 2 ? 'improvement' : delta <= -2 ? 'decline' : 'stable',
+    kind: mashed ? 'stable' : delta >= 2 ? 'improvement' : delta <= -2 ? 'decline' : 'stable',
     dimension: dim,
-    title:
-      delta >= 2 ? `${name} estimate rose ${r0(delta)} pts` : delta <= -2 ? `${name} estimate dipped ${r0(-delta)} pts` : `${name} estimate held steady`,
+    title: mashed
+      ? `${name} estimate kept, with a wider range`
+      : delta >= 2
+        ? `${name} estimate rose ${r0(delta)} pts`
+        : delta <= -2
+          ? `${name} estimate dipped ${r0(-delta)} pts`
+          : `${name} estimate held steady`,
     evidence: [
       ev('Before', `${r0(session.scoreBefore.score)} % (${r0(session.scoreBefore.lo)}–${r0(session.scoreBefore.hi)})`, [
         r0(session.scoreBefore.score),
@@ -198,7 +207,30 @@ export function sessionInsights(session: SessionRecord, previous?: SessionRecord
   }
 
   const warn = session.quality.flags.filter((f) => f.severity === 'warn');
-  if (warn.length) {
+  if (isMashedSession(session.quality)) {
+    const a = session.quality.anomaly;
+    const width = r0((session.scoreAfter.hi - session.scoreAfter.lo) / 2);
+    out.push({
+      id: `${session.id}-rushing`,
+      kind: 'data_quality',
+      dimension: dim,
+      title: 'Answers came in faster than the screen can be read',
+      evidence: [
+        ...(a
+          ? [
+              ev('Implausibly fast answers', `${a.rapid} of ${a.responded} (median ${a.medianRapidRtMs} ms, plausible minimum ≈ ${a.thresholdMs} ms)`, [a.rapid, a.responded, a.medianRapidRtMs, a.thresholdMs]),
+              ev('Correct among them', `${r0(a.rapidAccuracy * 100)} %`, [r0(a.rapidAccuracy * 100)]),
+              ev('Response-time effort', `${r0(a.effort * 100)} %`, [r0(a.effort * 100)]),
+            ]
+          : session.quality.flags.filter((f) => f.kind === 'random_responding').map((f) => ev('Random pressing', f.detail, []))),
+        ev('Session weight', `${Math.round(session.quality.weight * 100)} %`, [Math.round(session.quality.weight * 100)]),
+        ev('Uncertainty after the session', `±${width} pts`, [width]),
+      ],
+      confidence: 'high',
+      priority: 95,
+      tone: 'inform',
+    });
+  } else if (warn.length) {
     out.push({
       id: `${session.id}-quality`,
       kind: 'data_quality',
@@ -243,7 +275,23 @@ export function sessionInsights(session: SessionRecord, previous?: SessionRecord
       });
     }
   }
+  // A rushed session says nothing reliable about strain, fatigue or rhythm: keep the message focused.
+  if (mashed) return out.filter((i) => i.kind === 'data_quality' || i.id.endsWith('-delta')).sort((a, b) => b.priority - a.priority);
   return out.sort((a, b) => b.priority - a.priority);
+}
+
+/** The coach's contextual question after a rushed / random session (answered on the results page). */
+export function rushQuestion(session: SessionRecord): string | null {
+  if (!isMashedSession(session.quality)) return null;
+  const a = session.quality.anomaly;
+  const width = r0((session.scoreAfter.hi - session.scoreAfter.lo) / 2);
+  const fast = a
+    ? `${a.rapid} of your ${a.responded} answers came in at a median ${a.medianRapidRtMs} ms — faster than anyone can read the screen — and only ${r0(a.rapidAccuracy * 100)} % of those were right.`
+    : 'Your answers were very fast and close to coin-flipping.';
+  return (
+    `${fast} I did not record that as a drop in ability: those answers were left out, the session counts ${Math.round(session.quality.weight * 100)} %, ` +
+    `and the estimate is now marked as highly uncertain (±${width} pts). Were you distracted, or rushing?`
+  );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -285,25 +333,46 @@ export function profileInsights(twin: TwinState, sessions: readonly SessionRecor
     });
   }
 
-  // Plateau: ≥ 6 sessions, last 5 within 4 points.
+  // Plateau: flat trend and small spread over the last sessions (see formats.ts).
   for (const p of measured) {
-    const h = dimensionHistory(twin, p.id).slice(-5);
-    if (dimensionHistory(twin, p.id).length >= 6) {
-      const range = Math.max(...h.map((x) => x.score)) - Math.min(...h.map((x) => x.score));
-      if (range < 4) {
-        out.push({
-          id: `plateau-${p.id}`,
-          kind: 'plateau',
-          dimension: p.id,
-          title: `${short(p.id)} has levelled off`,
-          evidence: [ev('Range over the last 5 sessions', `${range.toFixed(1)} pts`, [Number(range.toFixed(1))])],
-          confidence: 'moderate',
-          priority: 55,
-          tone: 'advise',
-          suggestion: getDimension(p.id).strategies[1]?.key,
-        });
-      }
-    }
+    const plateau = detectPlateau(twin, sessions, p.id);
+    if (!plateau) continue;
+    const format = nextFormat(sessions, p.id);
+    out.push({
+      id: `plateau-${p.id}`,
+      kind: 'plateau',
+      dimension: p.id,
+      title: `${short(p.id)} has levelled off`,
+      evidence: [
+        ev(`Progress curve · ${short(p.id)}: range over the last ${plateau.sessions} sessions`, `${plateau.range.toFixed(1)} pts`, [plateau.range]),
+        ev('Trend', `${plateau.slope >= 0 ? '+' : ''}${plateau.slope.toFixed(1)} pts per session`, [Math.abs(plateau.slope)]),
+        ev('Average estimate in that window', `${r0(plateau.meanScore)} %`, [r0(plateau.meanScore)]),
+        ev('Next format', TRAINING_FORMATS[format].name),
+      ],
+      confidence: 'moderate',
+      priority: 68,
+      tone: 'advise',
+      suggestion: getDimension(p.id).strategies[1]?.key,
+    });
+  }
+
+  // Asymmetric mind: far-apart areas with non-overlapping intervals.
+  const asym = detectAsymmetry(profile);
+  if (asym) {
+    out.push({
+      id: `asymmetry-${asym.strong}-${asym.weak}`,
+      kind: 'asymmetry',
+      dimension: asym.weak,
+      title: `Asymmetric profile: ${short(asym.strong)} far ahead of ${short(asym.weak)}`,
+      evidence: [
+        ev(`Radar · ${short(asym.strong)}`, `${asym.strongScore} % (${asym.strongInterval[0]}–${asym.strongInterval[1]})`, [asym.strongScore, ...asym.strongInterval]),
+        ev(`Radar · ${short(asym.weak)}`, `${asym.weakScore} % (${asym.weakInterval[0]}–${asym.weakInterval[1]})`, [asym.weakScore, ...asym.weakInterval]),
+        ev('Gap', `${asym.gap} pts, intervals do not overlap`, [asym.gap]),
+      ],
+      confidence: 'high',
+      priority: 76,
+      tone: 'inform',
+    });
   }
 
   const confident = measured.filter((p) => p.summary.confidence !== 'low').sort((a, b) => b.summary.score - a.summary.score);

@@ -19,6 +19,8 @@ import {
   POPULATION_PRIOR,
   TARGET_SUCCESS,
   assessQuality,
+  isMashedSession,
+  sessionPosterior,
   computeCollabScore,
   createRng,
   mastery,
@@ -272,14 +274,48 @@ out();
   for (const d of twoChoice) {
     for (let i = 0; i < 100; i++) {
       const rand = simulateRun(d.task, plainUser({ randomResponder: true }), { mode: 'training', prior: POPULATION_PRIOR, ability: 0, rng, startedAt: 0 });
-      if (assessQuality(d.task, rand.trials, rand.behaviour).flags.some((x) => x.kind === 'random_responding')) tp++;
+      if (isMashedSession(assessQuality(d.task, rand.trials, rand.behaviour))) tp++;
       nr++;
       const genuine = simulateRun(d.task, plainUser(), { mode: 'training', prior: POPULATION_PRIOR, ability: rng.normal(0, 1), rng, startedAt: 0 });
-      if (assessQuality(d.task, genuine.trials, genuine.behaviour).flags.some((x) => x.kind === 'random_responding')) fp++;
+      if (isMashedSession(assessQuality(d.task, genuine.trials, genuine.behaviour))) fp++;
       ng++;
     }
   }
   out(`Random-pressing detector on the ${twoChoice.length} two-choice tasks: **${pct(tp / nr)} detected**, **${pct(fp / ng)} false alarms** on genuine users.`);
+  out();
+
+  // "Button masher" on every task: established profile (θ = 0.8, sd 0.35), then a mashed check-in.
+  out('**Button masher (all six tasks).** An established profile (θ = 0.8 ± 0.35) followed by a check-in of very fast random clicking, vs genuine users including flawless fast ones (θ = +3):');
+  out();
+  out('| Task | Masher sessions flagged | Genuine flagged (θ ~ N(0,1)) | Flawless users flagged (θ = +3) | Mean drop in θ, naive | Mean drop in θ, CogniTwin | Posterior sd before → after |');
+  out('|---|---|---|---|---|---|---|');
+  for (const d of DIMENSIONS) {
+    const prior = { mean: 0.8, sd: 0.35 };
+    let flagged = 0;
+    let fpG = 0;
+    let fpF = 0;
+    let dropNaive = 0;
+    let dropOurs = 0;
+    let sdAfter = 0;
+    const M = 60;
+    for (let i = 0; i < M; i++) {
+      const mash = simulateRun(d.task, plainUser({ randomResponder: true }), { mode: 'assessment', prior, ability: 0.8, rng, startedAt: 0 });
+      const q = assessQuality(d.task, mash.trials, mash.behaviour);
+      if (isMashedSession(q)) flagged++;
+      const naive = updateBelief(prior, mash.trials.map((t) => ({ level: t.level, success: t.success })), d.task);
+      const ours = sessionPosterior(prior, mash.trials, q, d.task);
+      dropNaive += prior.mean - naive.mean;
+      dropOurs += prior.mean - ours.mean;
+      sdAfter += ours.sd;
+      const g = simulateRun(d.task, plainUser(), { mode: 'assessment', prior: POPULATION_PRIOR, ability: rng.normal(0, 1), rng, startedAt: 0 });
+      if (isMashedSession(assessQuality(d.task, g.trials, g.behaviour))) fpG++;
+      const fl = simulateRun(d.task, plainUser(), { mode: 'assessment', prior: POPULATION_PRIOR, ability: 3, rng, startedAt: 0 });
+      if (isMashedSession(assessQuality(d.task, fl.trials, fl.behaviour))) fpF++;
+    }
+    out(`| ${d.task.name} | ${pct(flagged / M)} | ${pct(fpG / M)} | ${pct(fpF / M)} | ${f(dropNaive / M)} | ${f(dropOurs / M)} | ${f(prior.sd)} → ${f(sdAfter / M)} |`);
+  }
+  out();
+  out('Rapid guesses are removed from the likelihood (effort-moderated scoring) and the posterior may not shrink: the mashed check-in barely moves the estimate and makes the twin *less* certain, instead of reading as a collapse in ability.');
   out();
   const task = DIMENSIONS.find((x) => x.id === 'inhibition')!.task;
   let errClean = 0;

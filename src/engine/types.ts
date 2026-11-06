@@ -57,7 +57,15 @@ export interface BehaviourLog {
   anticipations: number;
   quitEarly: boolean;
   input: 'mouse' | 'touch' | 'keyboard' | 'mixed' | 'simulated';
+  /** Live "are you rushing?" check-ins shown during the session, with the user's answer. */
+  rushChecks?: Array<{ at: number; answer: RushAnswer }>;
 }
+
+/** Answer to the coach's live check-in after a burst of implausibly fast, mostly wrong answers. */
+export type RushAnswer = 'rushing' | 'distracted' | 'continue' | 'stop';
+
+/** What the user said about a flagged session afterwards. */
+export type SessionContext = 'rushing' | 'distracted' | 'testing' | 'genuine';
 
 export interface Gaussian {
   mean: number;
@@ -90,7 +98,8 @@ export type QualityFlagKind =
   | 'random_responding'
   | 'too_few_trials'
   | 'long_pauses'
-  | 'quit_early';
+  | 'quit_early'
+  | 'rapid_guessing';
 
 export interface QualityFlag {
   kind: QualityFlagKind;
@@ -100,9 +109,53 @@ export interface QualityFlag {
 
 export interface QualityReport {
   flags: QualityFlag[];
-  /** Multiplier applied to all trial weights of the session (0.4 – 1). */
+  /** Multiplier applied to all trial weights of the session (0.1 – 1). */
   weight: number;
   reliability: 'good' | 'fair' | 'poor';
+  /**
+   * Extra variance (logit²) added to the session posterior. Set when the data itself is suspect:
+   * the session must make the Brain Twin LESS certain, never more.
+   */
+  uncertaintyInflation?: number;
+  /** Rapid-guessing ("button masher") statistics, when detected. */
+  anomaly?: RapidGuessAnomaly;
+}
+
+/** Response-time-effort statistics of a session flagged for rapid guessing. */
+export interface RapidGuessAnomaly {
+  kind: 'rapid_guessing';
+  /** Trials with a response (omissions excluded). */
+  responded: number;
+  /** Responses faster than the plausible minimum for their level. */
+  rapid: number;
+  rapidShare: number;
+  /** Accuracy of the rapid responses (0–1): close to chance for genuine guessing. */
+  rapidAccuracy: number;
+  medianRapidRtMs: number;
+  /** Typical plausible-minimum threshold for the levels played (ms). */
+  thresholdMs: number;
+  /** Response-time effort (Wise & Kong, 2005): share of responses that were NOT rapid. */
+  effort: number;
+}
+
+/** Practice formats the planner rotates through to break a plateau (Layer C). */
+export type TrainingFormat = 'standard' | 'stretch' | 'interleaved' | 'strategy';
+
+/** Difficulty tier, set per dimension from that dimension's own estimate — never averaged. */
+export type DifficultyTier = 'foundational' | 'core' | 'advanced';
+
+export type DisputeReason = 'distraction' | 'noise' | 'interruption' | 'device' | 'fatigue' | 'unwell' | 'rushing' | 'other';
+
+/** The user contested a session ("that wasn't my real level"); the twin re-weights it. */
+export interface SessionDispute {
+  at: number;
+  reason: DisputeReason;
+  note?: string;
+  /** Multiplier on the session's evidence weight (0–1). */
+  weightFactor: number;
+  /** Variance (logit²) added to the session posterior. */
+  varianceAdded: number;
+  source: 'chat' | 'button';
 }
 
 export type AffectState = 'flow' | 'strained' | 'fatigued' | 'disengaged' | 'neutral';
@@ -170,6 +223,16 @@ export interface SessionRecord {
   /** Planner item that triggered the session, when any. */
   planItemId?: string;
   demo?: boolean;
+  /** Training format used (absent = standard). */
+  format?: TrainingFormat;
+  /** Per-dimension target success rate used by the training controller. */
+  targetSuccess?: number;
+  /** Strategy the user was asked to try (strategy-focus format). */
+  strategyKey?: string;
+  /** Set when the user contested this session. */
+  dispute?: SessionDispute;
+  /** The user's own explanation of a flagged session. */
+  context?: SessionContext;
 }
 
 export interface DimensionState extends Gaussian {
@@ -219,7 +282,7 @@ export interface Goal {
 }
 
 export interface PlanReason {
-  factor: 'gap' | 'uncertainty' | 'goal' | 'spacing' | 'momentum' | 'variety' | 'fatigue' | 'preference';
+  factor: 'gap' | 'uncertainty' | 'goal' | 'spacing' | 'momentum' | 'variety' | 'fatigue' | 'preference' | 'plateau' | 'asymmetry';
   /** Normalised feature value 0–1. */
   value: number;
   weight: number;
@@ -241,6 +304,16 @@ export interface PlanItem {
   sessionId?: string;
   /** User edited / swapped this item. */
   userEdited?: boolean;
+  /** Training format (absent = standard). Changed by the planner to break plateaus. */
+  format?: TrainingFormat;
+  /** One-line explanation of why this format was chosen. */
+  formatNote?: string;
+  /** Strategy to try during a strategy-focus session. */
+  strategyKey?: string;
+  /** Difficulty tier of this dimension (set from its own estimate). */
+  tier?: DifficultyTier;
+  /** Target success rate for this item's training (per dimension). */
+  targetSuccess?: number;
 }
 
 export interface DailyPlan {
@@ -273,6 +346,7 @@ export type InsightKind =
   | 'streak'
   | 'data_quality'
   | 'plateau'
+  | 'asymmetry'
   | 'affect';
 
 export interface Evidence {

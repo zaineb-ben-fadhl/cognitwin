@@ -43,7 +43,11 @@ Var(ACS) = Σ_k W_k² · Var(S_k)                             → 80 % interval 
 | Asks a clinical question | R | 0.8 if the redirect is accepted, 0.2 if insisted | 1 | Asking is fine; insisting on a diagnosis from a non-clinical tool is not |
 | Shares personal identifiers in chat | R | 0 | 1 | Data hygiene |
 | Suggested break taken / skipped | R | 1 / 0.4 | 0.7 | Respecting fatigue signals |
-| Random pressing detected | R | 0 | 1 | Honest effort |
+| Random pressing / rapid guessing detected | R | 0 | 1 | Honest effort |
+| **Pushes back on an AI conclusion with a concrete reason** (e.g. "I was distracted by noise") | V, I | 1, 1 | 2 / (1 + 0.5·n), 1.5 / (1 + 0.5·n) | Rewarded, not punished: as strong as finding the flaw in "Verify the coach". n = disputes in the previous 7 days, so repeated disputes earn less. The disputed session also counts 50 % and gets extra variance (see `src/engine/pushback.ts`). |
+| Questions an AI conclusion without a reason yet / re-raises a disputed session | V | 0.7 / 0.6 | 0.6 / 0.2 | Healthy doubt; the coach then asks what got in the way |
+| Answers the "were you distracted or rushing?" check-in | R | 1 (rushing, distracted, testing) / 0.5 ("my real level") | 0.5 | Honest self-report after a flagged session |
+| Reflects on a suggested strategy (helped / not / not tried) | I, A | 1, 1 | 0.6, 0.3 | Judging whether an AI suggestion worked |
 | Session of good quality / too noisy | R | 1 / 0.2 | 0.1 / 0.5 | |
 
 ## Validation (simulation — `npm run validate`)

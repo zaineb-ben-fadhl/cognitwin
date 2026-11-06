@@ -9,7 +9,21 @@ export const toRadar = (profile: DimensionProfile[]): RadarEntry[] =>
   profile.map((p) => ({ id: p.id, score: p.summary.score, lo: p.summary.lo, hi: p.summary.hi, unmeasured: p.unmeasured }));
 
 /** Radar + its table twin (the accessible equivalent of the chart). */
-export function ProfileView({ entries, compare, compareLabel, label, profile }: { entries: RadarEntry[]; compare?: RadarEntry[]; compareLabel?: string; label?: string; profile?: DimensionProfile[] }) {
+export function ProfileView({
+  entries,
+  compare,
+  compareLabel,
+  label,
+  profile,
+  split,
+}: {
+  entries: RadarEntry[];
+  compare?: RadarEntry[];
+  compareLabel?: string;
+  label?: string;
+  profile?: DimensionProfile[];
+  split?: { strong: string; weak: string };
+}) {
   const [table, setTable] = useState(false);
   return (
     <div>
@@ -44,7 +58,7 @@ export function ProfileView({ entries, compare, compareLabel, label, profile }: 
           </tbody>
         </table>
       ) : (
-        <ProfileRadar entries={entries} compare={compare} compareLabel={compareLabel} label={label} />
+        <ProfileRadar entries={entries} compare={compare} compareLabel={compareLabel} label={label} split={split} />
       )}
       <p className="mt-2 text-center text-[11.5px] text-muted">
         % = expected mastery of each exercise’s 10 difficulty levels — compared with the exercise, never with other people. {entries.some((e) => e.unmeasured) && `Hollow dots: ${entries.filter((e) => e.unmeasured).map((e) => getDimension(e.id).short).join(', ')} not measured yet.`}

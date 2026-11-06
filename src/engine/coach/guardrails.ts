@@ -56,9 +56,29 @@ const CLINICAL_RE = new RegExp(`\\b(${CLINICAL_TERMS.join('|')})\\b`, 'gi');
 const CERTAINTY_RE =
   /\b(will (definitely|certainly|surely|undoubtedly)|definitely will|guarantee(d|s)?|100 ?% (sure|certain)|without (a )?doubt|is certain to|are certain to|you will reach)\b/gi;
 
+/** A future score stated as one number: "your score will be 62 %", "you'll reach 70 % next month". */
+const POINT_FORECAST_RE =
+  /\b(will|'ll|is going to|are going to|gonna|shall)\s+(definitely\s+|surely\s+|certainly\s+)?(be|reach|hit|score|get|have|land|end up)\s+(at\s+|on\s+|around\s+|about\s+|roughly\s+|exactly\s+|precisely\s+)?\d+(\.\d+)?\s?(%|percent|pts|points)/gi;
+/** "exactly 62 %" / "precisely 70 percent". */
+const EXACT_RE = /\b(exactly|precisely)\s+\d+(\.\d+)?\s?(%|percent|pts|points)/gi;
+/** Mentions of a future horizon. */
+const FUTURE_RE = /\b(next (week|month|year)|in (a|one|two|three|four|five|six|\d+) (days?|weeks?|months?|years?)|tomorrow|a month from now|from now)\b/i;
+/** Hedges that make a forecast probabilistic. */
+const HEDGE_RE = /(\d+\s?[–-]\s?\d+|\binterval\b|\brange\b|\bchance\b|\bprobab\w*|\blikely\b|\bcould\b|\bmight\b|\bmay\b|\b\d+ (in|out of) \d+\b|\bestimate\b|\bpossib\w*)/i;
+
+/**
+ * Forecast rule ("always with uncertainty, never as certainty"): a future score may never be a
+ * single certain number, and any forecast with a percentage must carry its range or probability.
+ */
+export function findForecastViolations(text: string): string[] {
+  const out = [...text.matchAll(POINT_FORECAST_RE), ...text.matchAll(EXACT_RE)].map((m) => m[0]);
+  if (!out.length && FUTURE_RE.test(text) && /\d+(\.\d+)?\s?%/.test(text) && !HEDGE_RE.test(text)) out.push('forecast without a range or probability');
+  return [...new Set(out)];
+}
+
 export interface GuardrailResult {
   ok: boolean;
-  violations: Array<{ rule: 'clinical' | 'grounding' | 'certainty' | 'length'; detail: string }>;
+  violations: Array<{ rule: 'clinical' | 'grounding' | 'certainty' | 'forecast' | 'length'; detail: string }>;
   checks: string[];
 }
 
@@ -82,6 +102,10 @@ export function checkMessage(text: string, opts: { allowedNumbers?: readonly num
   const certainty = [...text.matchAll(CERTAINTY_RE)].map((m) => m[0]);
   if (certainty.length) violations.push({ rule: 'certainty', detail: `Certainty language: ${certainty.join(', ')}` });
   checks.push('No guarantees about the future');
+
+  const forecast = findForecastViolations(text);
+  if (forecast.length) violations.push({ rule: 'forecast', detail: `Forecast stated as certain: ${forecast.join(', ')}` });
+  checks.push('Forecasts carry a range or probability');
 
   if (opts.allowedNumbers) {
     const allowed = opts.allowedNumbers;

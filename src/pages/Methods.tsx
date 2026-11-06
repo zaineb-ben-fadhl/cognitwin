@@ -1,4 +1,5 @@
 import { ChevronDown, RotateCcw } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useMemo, useState } from 'react';
 import { DimLabel } from '@/components/dim';
 import { Badge, Button, Card, CardHeader, PageHeader } from '@/components/ui';
@@ -9,8 +10,15 @@ import {
   DRIFT_PER_SESSION,
   FATIGUE_PENALTY,
   GENERAL_REFERENCES,
+  ASYMMETRY_GAP,
   PLAN_WEIGHTS,
+  PLATEAU_MAX_RANGE,
+  PLATEAU_MAX_SLOPE,
+  PLATEAU_WINDOW,
   POPULATION_PRIOR,
+  RAPID_FRACTION,
+  TIER_LIMITS,
+  TRAINING_FORMATS,
   TARGET_SUCCESS,
   THETA_GRID,
   posteriorDensity,
@@ -292,8 +300,44 @@ export default function MethodsPage() {
           <li>Brain Twin drift keeps tracking honest during learning: interval coverage 73 % vs 33 % for a model that never forgets.</li>
           <li>14-day projections: the 80 % band contained the true future level 89 % of the time (cautious by design).</li>
           <li>Training targeting: observed success within ~2 points of the gentle / balanced / stretch targets.</li>
-          <li>Random-pressing detector: 99 % detected, 0 % false alarms on genuine simulated users.</li>
+          <li>Random-pressing detector: 100 % detected, 0 % false alarms on genuine simulated users.</li>
+          <li>Button masher on all six tasks: 100 % flagged, 0 % of genuine or flawless users flagged; the estimate barely moves (naive scoring drops it by ~1 logit).</li>
         </ul>
+      </Card>
+
+      <Card>
+        <CardHeader title="Robustness to edge cases" subtitle="Each mechanism is reproducible in the Robustness lab and covered by regression tests" />
+        <ul className="list-disc space-y-1.5 pl-5 text-[13px] text-ink-2">
+          <li>
+            <strong className="text-ink">Rapid guessing (“button masher”).</strong> Answers faster than {RAPID_FRACTION * 100} % of the typical time at their level and no better than guessing
+            are removed from the likelihood (effort-moderated scoring, Wise &amp; DeMars 2006); the rest counts 20 % and the posterior may not shrink, so the session is flagged as highly
+            uncertain instead of a drop. The coach asks, live and afterwards, whether you were distracted or rushing.
+          </li>
+          <li>
+            <strong className="text-ink">Plateaus.</strong> Flat over the last {PLATEAU_WINDOW} sessions (spread ≤ {PLATEAU_MAX_RANGE} pts, trend within ±{PLATEAU_MAX_SLOPE} pt/session) → the
+            planner rotates the practice format: {(['stretch', 'interleaved', 'strategy'] as const).map((f) => TRAINING_FORMATS[f].name).join(' → ')}. Formats change level selection, never
+            scoring.
+          </li>
+          <li>
+            <strong className="text-ink">Asymmetric profiles.</strong> Difficulty tier per dimension from its own estimate (foundational ≤ {TIER_LIMITS.foundational} %, advanced ≥{' '}
+            {TIER_LIMITS.advanced} %); a gap ≥ {ASYMMETRY_GAP} pts with non-overlapping intervals puts both ends in the plan. Nothing is averaged across dimensions.
+          </li>
+          <li>
+            <strong className="text-ink">Pushback.</strong> A disputed session counts 50 % and its posterior gets extra variance; the reasoned challenge is credited to critical verification
+            and iteration (diminishing for repeats) and can be undone.
+          </li>
+          <li>
+            <strong className="text-ink">Forecasts.</strong> Always an 80 % range with a probability, never one number; a guardrail blocks “will be N %” phrasing in every coach message,
+            and nothing is forecast beyond 90 days.
+          </li>
+          <li>
+            <strong className="text-ink">“Why this exercise?”</strong> Answered from the Brain Twin charts (session log, progress curve, weekly heatmap, radar, calendar, goals), each with its
+            numbers and a link.
+          </li>
+        </ul>
+        <Link to="/lab" className="mt-3 inline-block text-[13px] font-medium text-brand">
+          Open the Robustness lab →
+        </Link>
       </Card>
 
       <Card>

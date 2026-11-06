@@ -11,7 +11,7 @@
  */
 import { levelForSuccess, mostInformativeLevel, updateBelief, type Observation } from './irt';
 import type { AnyTaskSpec } from './tasks/types';
-import type { Gaussian, SessionMode, Trial } from './types';
+import type { Gaussian, SessionMode, TrainingFormat, Trial } from './types';
 import { clamp } from './stats';
 
 export type ChallengePreference = 'gentle' | 'balanced' | 'stretch';
@@ -22,12 +22,21 @@ export const TARGET_SUCCESS: Record<ChallengePreference, number> = {
   stretch: 0.7,
 };
 
+/** Target success of the "stretch" plateau-breaking format (challenge-point framework). */
+export const STRETCH_FORMAT_TARGET = 0.68;
+/** Level offsets of the "mixed levels" format: difficulty jumps around the target level. */
+export const INTERLEAVE_OFFSETS = [0, 2, -1, 1, -2, 1, 0, -1] as const;
+
 export interface AdaptiveOptions {
   mode: SessionMode;
   prior: Gaussian;
   challenge?: ChallengePreference;
   /** Fixed trial budget override (e.g. a short demo). */
   trialBudget?: number;
+  /** Training format (plateau breaker). Assessment ignores it. */
+  format?: TrainingFormat;
+  /** Per-dimension target success rate (asymmetric profiles); overrides the challenge preference. */
+  targetSuccess?: number;
 }
 
 export function toObservations(trials: readonly Trial[], sessionWeight = 1): Observation[] {
@@ -64,7 +73,9 @@ export class AdaptiveSession {
   }
 
   get targetSuccess(): number {
-    return Math.min(0.95, TARGET_SUCCESS[this.options.challenge ?? 'balanced'] + this.targetBoost);
+    let base = this.options.targetSuccess ?? TARGET_SUCCESS[this.options.challenge ?? 'balanced'];
+    if (this.options.format === 'stretch') base = Math.min(base, STRETCH_FORMAT_TARGET);
+    return Math.min(0.95, base + this.targetBoost);
   }
 
   get budget(): number {
@@ -98,7 +109,11 @@ export class AdaptiveSession {
       if (last !== undefined) level = clamp(level, last - 2, last + 2);
     } else {
       level = levelForSuccess(this.belief, this.targetSuccess, this.task);
-      if (last !== undefined) level = clamp(level, last - 2, last + 1);
+      if (this.options.format === 'interleaved') {
+        // Variable practice: jump around the target level instead of creeping up one step at a time.
+        level += INTERLEAVE_OFFSETS[this.trials.length % INTERLEAVE_OFFSETS.length];
+        if (last !== undefined) level = clamp(level, last - 3, last + 3);
+      } else if (last !== undefined) level = clamp(level, last - 2, last + 1);
     }
 
     const fails = trailingFailures(this.trials);

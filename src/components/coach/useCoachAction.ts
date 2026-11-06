@@ -17,7 +17,7 @@ export function useCoachAction() {
       logEvent('recommendation_response', { response: 'accepted', confidence: message?.confidence ?? 'moderate', evidenceViewed });
       switch (action.kind) {
         case 'start_session':
-          navigate(`/session/${action.taskId}?mode=${action.mode}`);
+          navigate(`/session/${action.taskId}?mode=${action.mode}${action.format && action.format !== 'standard' ? `&format=${action.format}` : ''}`);
           break;
         case 'open':
           navigate(action.route);

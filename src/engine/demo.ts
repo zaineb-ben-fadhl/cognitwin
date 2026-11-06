@@ -11,7 +11,7 @@ import { finalizeSession } from './session';
 import { simulateRun, trueAbility, type SimUser } from './simulate';
 import { applySession, createTwin, currentProfile, sessionPrior } from './twin';
 import { clamp } from './stats';
-import type { DailyPlan, Goal, SessionMode, SessionRecord, TwinState } from './types';
+import type { DailyPlan, DimensionId, Goal, PlanItem, SessionMode, SessionRecord, TwinState } from './types';
 
 const DAY = 86_400_000;
 
@@ -32,9 +32,25 @@ export interface DemoData {
   prefs: PlannerPrefs;
 }
 
-export function buildDemoHistory(now: number, seed = 7): DemoData {
+export interface DemoOptions {
+  /** Simulated learner (default: the demo persona). */
+  persona?: SimUser;
+  /** Length of the history in days (default 42). */
+  days?: number;
+  /** Include the realistic one-week break (exam week). Default true. */
+  gap?: boolean;
+  /** Append a mashed check-in (very fast random clicking) on this dimension, a few minutes ago. */
+  masher?: DimensionId;
+  /** Append a session played while distracted (clearly below the learner's level) on this dimension, last evening. */
+  distracted?: DimensionId;
+}
+
+export function buildDemoHistory(now: number, seed = 7, options: DemoOptions = {}): DemoData {
   const rng = createRng(seed);
-  const start = startOfDay(now - 42 * DAY);
+  const persona = options.persona ?? DEMO_PERSONA;
+  const days = options.days ?? 42;
+  const withGap = options.gap ?? true;
+  const start = startOfDay(now - days * DAY);
   let twin = createTwin(start);
   const sessions: SessionRecord[] = [];
   const events: AIEvent[] = [];
@@ -44,12 +60,15 @@ export function buildDemoHistory(now: number, seed = 7): DemoData {
   const prefs: PlannerPrefs = { ...DEFAULT_PREFS, dailyMinutes: 10 };
   const evt = (type: AIEvent['type'], at: number, data?: AIEvent['data']) => events.push({ id: uid('ev_'), type, at, data });
 
-  const run = (dim: string, mode: SessionMode, at: number, stateShift: number, opts: { predict?: boolean; planItemId?: string } = {}) => {
+  const run = (dim: string, mode: SessionMode, at: number, stateShift: number, opts: { predict?: boolean; planItemId?: string; item?: PlanItem; user?: SimUser } = {}) => {
     const task = taskForDimension(dim);
     const prior = sessionPrior(twin, dim, at);
-    const ability = trueAbility(DEMO_PERSONA, dim, done[dim] ?? 0) + rng.normal(0, 0.08);
-    const res = simulateRun(task, DEMO_PERSONA, { mode, prior, ability, rng, startedAt: at, stateShift, challenge: prefs.challenge });
-    const progress = (at - start) / (42 * DAY);
+    const user = opts.user ?? persona;
+    const ability = trueAbility(persona, dim, done[dim] ?? 0) + rng.normal(0, 0.08);
+    const format = opts.item?.format;
+    const targetSuccess = opts.item?.targetSuccess;
+    const res = simulateRun(task, user, { mode, prior, ability, rng, startedAt: at, stateShift, challenge: prefs.challenge, format, targetSuccess });
+    const progress = (at - start) / (days * DAY);
     const mood = clamp(Math.round(3.4 + stateShift * 3 + rng.normal(0, 0.8)), 1, 5);
     const energy = clamp(Math.round(3.3 + stateShift * 4 + rng.normal(0, 0.9)), 1, 5);
     const willPredict = opts.predict ?? rng.chance(0.45);
@@ -66,6 +85,9 @@ export function buildDemoHistory(now: number, seed = 7): DemoData {
       deadlineFactor: 1.08,
       planItemId: opts.planItemId,
       demo: true,
+      format,
+      targetSuccess,
+      strategyKey: opts.item?.strategyKey,
     });
     if (willPredict) {
       // Over-confident at first, better calibrated with experience.
@@ -100,11 +122,11 @@ export function buildDemoHistory(now: number, seed = 7): DemoData {
   }
 
   let previous: DailyPlan | undefined;
-  for (let d = 1; d <= 41; d++) {
+  for (let d = 1; d <= days - 1; d++) {
     const dayStart = start + d * DAY;
     const weekday = new Date(dayStart).getDay();
-    const inGap = d >= 22 && d <= 26; // a realistic break (exam week)
-    const p = d >= 39 ? 1 : inGap ? 0.05 : weekday === 0 || weekday === 6 ? 0.45 : 0.8;
+    const inGap = withGap && d >= 22 && d <= 26; // a realistic break (exam week)
+    const p = d >= days - 3 ? 1 : inGap ? 0.05 : weekday === 0 || weekday === 6 ? 0.45 : 0.8;
 
     // Goals and notable interactions happen whether or not the learner trains that day.
     const noon = dayStart + 12 * 3600_000;
@@ -138,7 +160,7 @@ export function buildDemoHistory(now: number, seed = 7): DemoData {
       const lowConf = item.mode === 'assessment';
       const viewed = rng.chance(0.15 + 0.35 * (d / 41));
       evt('recommendation_response', at - 10_000, { response: resp, confidence: lowConf ? 'low' : 'moderate', evidenceViewed: viewed });
-      const s = run(item.dimension, item.mode, at, stateShift, { planItemId: item.id });
+      const s = run(item.dimension, item.mode, at, stateShift, { planItemId: item.id, item });
       item.done = true;
       item.sessionId = s.id;
       at = s.endedAt + 60_000;
@@ -150,6 +172,17 @@ export function buildDemoHistory(now: number, seed = 7): DemoData {
       evt('chat_question', at + 120_000, { clarifying, specificity: Math.round((0.3 + rng.next() * 0.7) * 100) / 100 });
       if (rng.chance(0.5)) evt('followup', at + 180_000);
     }
+  }
+
+  // Scenario add-ons, played through the same engine.
+  if (options.distracted) {
+    // Yesterday evening, or right after the last session if that was later.
+    const at = Math.max(startOfDay(now) - 3 * 3600_000, (sessions.at(-1)?.endedAt ?? 0) + 30 * 60_000);
+    if (at < now - 20 * 60_000) run(options.distracted, 'training', at, -1.6, { predict: false });
+  }
+  if (options.masher) {
+    const at = Math.max(now - 8 * 60_000, (sessions.at(-1)?.endedAt ?? 0) + 60_000);
+    run(options.masher, 'assessment', at, 0, { predict: false, user: { ...persona, randomResponder: true, lapseRate: 0, interruptRate: 0 } });
   }
 
   // Keep the coach-suggested goal open and slightly ahead of the learner, as in real use.

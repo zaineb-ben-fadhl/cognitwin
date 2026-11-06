@@ -48,6 +48,7 @@ export const sessionSchema = z.object({
     anticipations: count,
     quitEarly: z.boolean(),
     input: z.enum(['mouse', 'touch', 'keyboard', 'mixed', 'simulated']),
+    rushChecks: z.array(z.object({ at: num, answer: z.enum(['rushing', 'distracted', 'continue', 'stop']) })).max(20).optional(),
   }),
   selfPrediction: num.optional(),
   selfReportBefore: selfReport.optional(),
@@ -60,7 +61,13 @@ export const sessionSchema = z.object({
     cameraCapped: z.boolean().optional(),
   }),
   metrics: z.array(z.object({ key: z.string(), label: z.string(), value: num.nullable() }).passthrough()),
-  quality: z.object({ flags: z.array(z.object({ kind: z.enum(['interruptions', 'anticipations', 'random_responding', 'too_few_trials', 'long_pauses', 'quit_early']), detail: z.string().max(1000), severity: z.enum(['info', 'warn']) })), weight: proportion, reliability: z.enum(['good', 'fair', 'poor']) }),
+  quality: z.object({
+    flags: z.array(z.object({ kind: z.enum(['interruptions', 'anticipations', 'random_responding', 'too_few_trials', 'long_pauses', 'quit_early', 'rapid_guessing']), detail: z.string().max(1000), severity: z.enum(['info', 'warn']) })),
+    weight: proportion,
+    reliability: z.enum(['good', 'fair', 'poor']),
+    uncertaintyInflation: num.min(0).max(2).optional(),
+    anomaly: z.object({ kind: z.literal('rapid_guessing'), responded: count, rapid: count, rapidShare: proportion, rapidAccuracy: proportion, medianRapidRtMs: num.nonnegative(), thresholdMs: num.nonnegative(), effort: proportion }).optional(),
+  }),
   before: gaussian,
   after: gaussian,
   scoreBefore: score,
@@ -68,6 +75,18 @@ export const sessionSchema = z.object({
   deadlineFactor: num.min(0.5).max(3),
   demo: z.boolean().optional(),
   planItemId: z.string().max(100).optional(),
+  format: z.enum(['standard', 'stretch', 'interleaved', 'strategy']).optional(),
+  targetSuccess: num.min(0.5).max(0.99).optional(),
+  strategyKey: z.string().max(60).optional(),
+  dispute: z.object({
+    at: timestamp,
+    reason: z.enum(['distraction', 'noise', 'interruption', 'device', 'fatigue', 'unwell', 'rushing', 'other']),
+    note: z.string().max(200).optional(),
+    weightFactor: proportion,
+    varianceAdded: num.min(0).max(1),
+    source: z.enum(['chat', 'button']),
+  }).optional(),
+  context: z.enum(['rushing', 'distracted', 'testing', 'genuine']).optional(),
 }).refine((s) => findTask(s.taskId)?.dimension === s.dimension, 'Unknown task or mismatched dimension')
   .refine((s) => s.endedAt >= s.startedAt, 'Session ends before it starts');
 
@@ -101,7 +120,7 @@ export const exportSchema = z.object({
     goals: z.array(goalSchema).max(200),
     events: z.array(z.object({
       id: z.string(), at: timestamp,
-      type: z.enum(['coach_message', 'why_opened', 'chat_question', 'followup', 'claim_rated', 'verify_challenge', 'recommendation_response', 'plan_edited', 'retry_after_feedback', 'session_completed', 'goal_self_set', 'goal_from_ai', 'self_prediction', 'override_with_reason', 'clinical_query', 'pii_shared', 'break_suggested', 'privacy_reviewed', 'consent_informed', 'random_responding']),
+      type: z.enum(['coach_message', 'why_opened', 'chat_question', 'followup', 'claim_rated', 'verify_challenge', 'recommendation_response', 'plan_edited', 'retry_after_feedback', 'session_completed', 'goal_self_set', 'goal_from_ai', 'self_prediction', 'override_with_reason', 'clinical_query', 'pii_shared', 'break_suggested', 'privacy_reviewed', 'consent_informed', 'random_responding', 'pushback', 'rush_check_answered', 'strategy_reflection']),
       data: z.record(z.string(), z.union([num, z.string().max(3000), z.boolean()])).optional(),
     }).refine((e) => ['specificity', 'hints', 'predicted', 'actual'].every((k) => e.data?.[k] === undefined || typeof e.data[k] === 'number'), 'Invalid numeric event field')
       .refine((e) => e.type !== 'self_prediction' || (typeof e.data?.predicted === 'number' && typeof e.data?.actual === 'number'), 'Missing prediction data')).max(20000),

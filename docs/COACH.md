@@ -46,7 +46,7 @@ A noisy session (poor reliability) caps every derived insight at *low* confidenc
 - **Hedging proportional to confidence**: high → "Clearly, …", moderate → "It looks like …", low → "It's early, but possibly …".
 - **Structure**: finding → evidence in plain words → one concrete next step (from the dimension's strategy library, with sources).
 - **Feedback science**: process praise (effort, strategy, consistency), never trait praise (Hattie & Timperley, 2007).
-- **Chat**: 17 transparent intents (regex rules) + dimension detection from synonyms; each answer carries evidence and, where useful, an **action** (start a session, set a goal, take a break, open a page) that is only executed on the user's click.
+- **Chat**: 20 transparent intents (regex rules) + dimension detection from synonyms and task names — including `why_plan` (answers "why this exercise?" from the Brain Twin charts, see `src/engine/explain.ts`), `plateau` (explains the plateau and the format change) and `pushback` (disputes the session instead of defending the profile, see `src/engine/pushback.ts`); forecasts are answered per dimension as 80 % ranges with a probability, for the horizon asked (max 90 days). Each answer carries evidence and, where useful, an **action** (start a session, set a goal, take a break, open a page) that is only executed on the user's click.
 
 ### 3. Optional LLM narrative (`server/coach.ts`)
 
@@ -62,6 +62,7 @@ A noisy session (poor reliability) caps every derived insight at *low* confidenc
 | Non-clinical language | 38 term patterns (diagnosis, disorder, deficit, impairment, ADHD, dementia, IQ, therapy, symptom, patient, …) | LLM: one regeneration with the violation fed back, then fallback to the template answer |
 | Grounding | numbers in the reply and suggestions must match cited source evidence (exact or integer-rounded); unknown evidence ids are rejected and confidence is capped to the source | same |
 | No false certainty | regex for "will definitely", "guaranteed", "you will reach", … | same |
+| Forecasts carry their uncertainty | a future score may never be one number ("will be 62 %", "exactly 64 %"), and any forecast with a percentage must carry a range or probability — `findForecastViolations` | same |
 | Length | ≤ 900 characters | same |
 | PII hygiene (input) | e-mails, phone numbers, card numbers, 8-digit IDs (e.g. Tunisian CIN) are redacted before any call; the event is logged for the collaboration score | user is told what was removed |
 | Clinical questions | detector routes "do I have ADHD/dementia…", "diagnose…", "medication…" to a **fixed, reviewed reply** pointing to qualified professionals; never sent to the model | — |

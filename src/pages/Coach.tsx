@@ -1,6 +1,7 @@
 import { clsx } from 'clsx';
 import { Bot, Mic, MicOff, Send, ShieldCheck, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { CoachCard } from '@/components/coach/CoachCard';
 import { Badge, Button, Card, CardHeader, PageHeader } from '@/components/ui';
 import {
@@ -8,7 +9,11 @@ import {
   createRng,
   createVerifyChallenge,
   detectIntent,
+  detectPushback,
+  getDimension,
   isClarifying,
+  pickDisputedSession,
+  pushbackReply,
   redactPII,
   specificity,
   uid,
@@ -19,7 +24,14 @@ import { canListen, listenOnce } from '@/lib/voice';
 import { useStore } from '@/store';
 import { useCoachContext, useNow, useProfile } from '@/store/derived';
 
-const STARTERS = ['How am I doing?', "What's my plan today?", 'Why is my profile uncertain?', 'Give me a memory tip', 'Will my flexibility improve?', 'Explain my collaboration score'];
+const STARTERS = [
+  'How am I doing?',
+  'Why did you assign me this exercise today?',
+  'What exactly will my score be next month?',
+  'Why is my profile uncertain?',
+  'I feel stuck — my scores are not improving',
+  'Explain my collaboration score',
+];
 const DIM_WORDS = DIMENSIONS.flatMap((d) => [d.short.toLowerCase(), ...d.synonyms]);
 
 function VerifyChallengeCard() {
@@ -106,7 +118,9 @@ export default function CoachPage() {
   const clearChat = useStore((s) => s.clearChat);
   const logEvent = useStore((s) => s.logEvent);
   const consent = useStore((s) => s.consent);
-  const [text, setText] = useState('');
+  const [params] = useSearchParams();
+  // Prefilled question (Robustness lab): typed in the box, sent only when the user presses Send.
+  const [text, setText] = useState(() => (params.get('ask') ?? '').slice(0, 1000));
   const [busy, setBusy] = useState(false);
   const [listening, setListening] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -137,7 +151,13 @@ export default function CoachPage() {
       logEvent('pii_shared', { kinds: found.join(',') });
       setNotice(`For your privacy I removed a ${found.join(' and ')} from your message. There's no need to share personal identifiers with the coach.`);
     }
-    const { intent, dimension } = detectIntent(clean);
+    const detected = detectIntent(clean);
+    const { dimension } = detected;
+    let { intent } = detected;
+    const pushbackSignal = detectPushback(clean);
+    const lastCoach = [...chat].reverse().find((m) => m.role === 'coach');
+    // Follow-up to "what got in the way?": a bare reason ("noise around me") completes the pushback.
+    if (intent !== 'pushback' && lastCoach?.intent === 'pushback' && !lastCoach.evidence.length && pushbackSignal.context) intent = 'pushback';
     const lastUser = [...chat].reverse().find((m) => m.role === 'user');
     const isFollowup = !!lastUser && Date.now() - lastUser.at < 4 * 60_000 && (lastUser.intent === intent || /^(and|what about|why|how come|so|but|ok)/i.test(clean) || (!!dimension && lastUser.text.toLowerCase().includes(dimension)));
     logEvent('chat_question', { clarifying: isClarifying(clean), specificity: specificity(clean, DIM_WORDS) });
@@ -148,6 +168,28 @@ export default function CoachPage() {
     }
     const user: CoachMessage = { id: uid('um_'), role: 'user', text: clean, at: Date.now(), evidence: [], insightIds: [], confidence: 'high', source: 'user', intent };
     addChat(user);
+    // Pushback: revise the profile instead of defending it — deterministic, with exact before/after numbers.
+    if (intent === 'pushback') {
+      const reason = pushbackSignal.reason ?? pushbackSignal.context;
+      const st = useStore.getState();
+      const target = reason ? pickDisputedSession(st.sessions, Date.now(), dimension) : undefined;
+      if (reason && target) {
+        const planBefore = st.plans.at(-1)?.items.find((i) => i.dimension === target.dimension)?.mode;
+        const outcome = st.disputeSession(target.id, reason, { note: clean.slice(0, 200), source: 'chat' });
+        const planAfter = useStore.getState().plans.at(-1)?.items.find((i) => i.dimension === target.dimension);
+        const planNote =
+          planAfter?.mode === 'assessment' && planBefore !== 'assessment'
+            ? `I've added a short ${getDimension(target.dimension).short} re-check to today's plan for a calmer moment.`
+            : 'A calm session on it will settle the question faster than anything I could argue.';
+        addChat({ ...pushbackReply(outcome, reason, { planNote }), at: Date.now() });
+      } else {
+        // No concrete reason yet: still a healthy challenge (logged), and the coach asks for context.
+        logEvent('pushback', { reason: reason ?? 'none' });
+        addChat({ ...pushbackReply(null, reason ?? null), at: Date.now() });
+      }
+      logEvent('coach_message', { confidence: 'high', engaged: true });
+      return;
+    }
     setBusy(true);
     try {
       const reply = await askCoach(clean, ctx, [...chat, user], () => useStore.getState().consent.llm && useStore.getState().chat.some((m) => m.id === user.id));

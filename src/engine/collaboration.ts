@@ -63,7 +63,10 @@ export type AIEventType =
   | 'break_suggested'
   | 'privacy_reviewed'
   | 'consent_informed'
-  | 'random_responding';
+  | 'random_responding'
+  | 'pushback'
+  | 'rush_check_answered'
+  | 'strategy_reflection';
 
 export interface AIEvent {
   id: string;
@@ -154,6 +157,22 @@ export function opportunitiesFor(e: AIEvent): Opportunity[] {
       return [o('responsible', 1, 1, 'Read the consent details')];
     case 'random_responding':
       return [o('responsible', 0, 1, 'Random pressing detected')];
+    case 'pushback': {
+      // Disagreeing with the AI is rewarded, not punished — but repeated disputes earn less.
+      const decay = 1 / (1 + 0.5 * Math.max(0, Number(d.nth ?? 0)));
+      if (d.repeat === true) return [o('verification', 0.6, 0.2, 'Re-raised a disputed session')];
+      if (!d.reason || d.reason === 'none') return [o('verification', 0.7, 0.6 * decay, 'Questioned an AI conclusion')];
+      return [
+        // As strong as finding the flaw in "Verify the coach": an explicit, reasoned challenge.
+        o('verification', 1, 2 * decay, 'Challenged an AI conclusion with a concrete reason'),
+        o('iteration', 1, 1.5 * decay, 'Gave context so the AI could revise the profile'),
+      ];
+    }
+    case 'rush_check_answered':
+      // Honest self-report after a rushed session is responsible use; "that's my real level" is neutral.
+      return [o('responsible', d.answer === 'genuine' ? 0.5 : 1, 0.5, d.answer === 'genuine' ? 'Answered the rushing check-in' : 'Honestly explained a rushed session')];
+    case 'strategy_reflection':
+      return [o('iteration', 1, 0.6, 'Reflected on a new strategy'), o('autonomy', 1, 0.3, 'Judged own strategy use')];
     case 'coach_message':
       // Weak "missed opportunity" evidence: an AI recommendation the user never questioned.
       // Cancelled out as soon as the user opens the why, asks or follows up.

@@ -14,6 +14,7 @@ const GoalsPage = lazy(() => import('./pages/Goals'));
 const CollabPage = lazy(() => import('./pages/Collab'));
 const MethodsPage = lazy(() => import('./pages/Methods'));
 const PrivacyPage = lazy(() => import('./pages/Privacy'));
+const LabPage = lazy(() => import('./pages/Lab'));
 
 const DAY = 86_400_000;
 
@@ -68,7 +69,7 @@ export default function App() {
 
   if (!hydrated) return <Loading />;
 
-  const open = ['/welcome', '/methods', '/privacy'];
+  const open = ['/welcome', '/methods', '/privacy', '/lab'];
   if (!onboarded && !open.includes(location.pathname)) return <Navigate to="/welcome" replace />;
 
   if (location.pathname === '/welcome') {
@@ -93,6 +94,7 @@ export default function App() {
           <Route path="/collab" element={<CollabPage />} />
           <Route path="/methods" element={<MethodsPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/lab" element={<LabPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>

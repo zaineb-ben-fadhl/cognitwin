@@ -8,7 +8,7 @@ import { AdaptiveSession, type ChallengePreference } from './adaptive';
 import { pSuccess } from './irt';
 import type { Rng } from './rng';
 import type { AnyTaskSpec } from './tasks/types';
-import type { BehaviourLog, DimensionId, Gaussian, SessionMode, Trial } from './types';
+import type { BehaviourLog, DimensionId, Gaussian, SessionMode, TrainingFormat, Trial } from './types';
 
 export interface SimUser {
   /** True ability per dimension at the start (logits). */
@@ -38,6 +38,8 @@ export interface SimRunOptions {
   startedAt: number;
   deadlineFactor?: number;
   challenge?: ChallengePreference;
+  format?: TrainingFormat;
+  targetSuccess?: number;
   /** Time-of-day / state effect on ability for this run (logits). */
   stateShift?: number;
   trialBudget?: number;
@@ -57,6 +59,8 @@ export function simulateRun(task: AnyTaskSpec, user: SimUser, opts: SimRunOption
     prior: opts.prior,
     challenge: opts.challenge,
     trialBudget: opts.trialBudget,
+    format: opts.format,
+    targetSuccess: opts.targetSuccess,
   });
   const factor = opts.deadlineFactor ?? 1;
   const ability = opts.ability + (opts.stateShift ?? 0);
@@ -104,9 +108,11 @@ export function simulateRun(task: AnyTaskSpec, user: SimUser, opts: SimRunOption
       rt = Math.min(rt, deadlineMs * 0.97);
     } else {
       errorType = task.sim.errorFor(stim, rng);
+      // A button masher always presses something.
+      if (user.randomResponder && errorType === 'omission') errorType = task.guessing > 0 ? 'wrong_choice' : 'commission';
       if (errorType === 'omission') {
         rt = null;
-      } else if (rng.chance(0.25) && task.guessing > 0) {
+      } else if (rng.chance(0.25) && task.guessing > 0 && !user.randomResponder) {
         // Correct but too slow.
         correct = true;
         errorType = 'slow';

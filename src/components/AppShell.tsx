@@ -1,5 +1,5 @@
 import { clsx } from 'clsx';
-import { BookOpen, Brain, Dumbbell, Flag, Handshake, House, Menu, MessagesSquare, Moon, Shield, Sun, SunMoon, X } from 'lucide-react';
+import { BookOpen, Brain, Dumbbell, Flag, FlaskConical, Handshake, House, Menu, MessagesSquare, Moon, Shield, Sun, SunMoon, X } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useStore } from '@/store';
@@ -13,6 +13,7 @@ const NAV = [
   { to: '/goals', label: 'Goals', icon: Flag },
   { to: '/collab', label: 'AI Collaboration', icon: Handshake },
   { to: '/methods', label: 'Methods', icon: BookOpen },
+  { to: '/lab', label: 'Robustness lab', icon: FlaskConical },
   { to: '/privacy', label: 'Privacy & settings', icon: Shield },
 ];
 

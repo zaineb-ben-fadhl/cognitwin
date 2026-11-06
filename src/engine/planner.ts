@@ -6,9 +6,11 @@
  * weight, contribution and a sentence), so the plan is explainable line by line, and every
  * new plan is diffed against the previous one so the user sees *why* it evolved.
  */
-import { TARGET_SUCCESS, type ChallengePreference } from './adaptive';
+import { STRETCH_FORMAT_TARGET, type ChallengePreference } from './adaptive';
 import { getDimension, taskForDimension } from './dimensions';
+import { TRAINING_FORMATS, detectPlateau, nextFormat, nextStrategy, type PlateauStatus } from './formats';
 import { levelForSuccess } from './irt';
+import { TIER_LABEL, detectAsymmetry, tierFor, tierTarget, type Asymmetry } from './tiers';
 import { uid } from './rng';
 import { clamp } from './stats';
 import { currentProfile, dimensionHistory, type DimensionProfile } from './twin';
@@ -25,6 +27,8 @@ export const PLAN_WEIGHTS: Record<Exclude<PlanReason['factor'], 'fatigue'>, numb
   momentum: 0.05,
   variety: 0.05,
   preference: 0.05,
+  plateau: 0.1,
+  asymmetry: 0.1,
 };
 /** Penalty subtracted when a dimension was already practised twice today. */
 export const FATIGUE_PENALTY = 0.3;
@@ -61,9 +65,16 @@ interface Context {
   goals: readonly Goal[];
   prefs: PlannerPrefs;
   twin: TwinState;
+  /** Profile-level analysis, computed once per plan (derived on demand when absent). */
+  asymmetry?: Asymmetry | null;
 }
 
-export function scoreDimension(p: DimensionProfile, ctx: Context): { utility: number; reasons: PlanReason[]; mode: SessionMode } {
+function asymmetryOf(ctx: Context): Asymmetry | null {
+  if (ctx.asymmetry === undefined) ctx.asymmetry = detectAsymmetry(currentProfile(ctx.twin, ctx.now));
+  return ctx.asymmetry;
+}
+
+export function scoreDimension(p: DimensionProfile, ctx: Context): { utility: number; reasons: PlanReason[]; mode: SessionMode; plateau: PlateauStatus | null } {
   const today = localDate(ctx.now);
   const dimSessions = ctx.sessions.filter((s) => s.dimension === p.id);
   const todayCount = dimSessions.filter((s) => localDate(s.endedAt) === today).length;
@@ -73,6 +84,9 @@ export function scoreDimension(p: DimensionProfile, ctx: Context): { utility: nu
   const history = dimensionHistory(ctx.twin, p.id);
   const recent = history.slice(-4);
   const momentumPts = recent.length >= 2 ? recent.at(-1)!.score - recent[0].score : 0;
+  const plateau = p.unmeasured ? null : detectPlateau(ctx.twin, ctx.sessions, p.id);
+  const asym = asymmetryOf(ctx);
+  const asymRole = asym?.strong === p.id ? 'strong' : asym?.weak === p.id ? 'weak' : null;
 
   const f = {
     gap: p.unmeasured ? 0.5 : clamp(1 - p.summary.score / 100, 0, 1),
@@ -82,6 +96,8 @@ export function scoreDimension(p: DimensionProfile, ctx: Context): { utility: nu
     momentum: clamp(momentumPts / 10, 0, 1),
     variety: todayCount === 0 ? 1 : 0,
     preference: ctx.prefs.focus.includes(p.id) ? 1 : 0,
+    plateau: plateau ? 1 : 0,
+    asymmetry: asymRole ? 1 : 0,
   };
   const short = getDimension(p.id).short;
   const text: Record<keyof typeof f, string> = {
@@ -95,6 +111,15 @@ export function scoreDimension(p: DimensionProfile, ctx: Context): { utility: nu
     momentum: `Improving lately (+${Math.round(momentumPts)} pts) — keep the momentum`,
     variety: 'Not practised yet today',
     preference: 'You asked to focus on this area',
+    plateau: plateau
+      ? `Plateau: ${short} has stayed within ${Math.round(plateau.range)} pts over ${plateau.sessions} sessions (trend ${plateau.slope >= 0 ? '+' : ''}${plateau.slope.toFixed(1)} pts/session) — changing the format`
+      : '',
+    asymmetry:
+      asymRole === 'strong'
+        ? `Your strongest area (${asym!.strongScore} %) — advanced work so it keeps stretching instead of coasting`
+        : asymRole === 'weak'
+          ? `Your lowest area (${asym!.weakScore} %) — foundational steps first, at its own level`
+          : '',
   };
   const reasons: PlanReason[] = (Object.keys(f) as Array<keyof typeof f>)
     .map((k) => ({ factor: k, value: f[k], weight: PLAN_WEIGHTS[k], contribution: f[k] * PLAN_WEIGHTS[k], text: text[k] }))
@@ -112,7 +137,7 @@ export function scoreDimension(p: DimensionProfile, ctx: Context): { utility: nu
   }
   reasons.sort((a, b) => b.contribution - a.contribution);
   const mode: SessionMode = p.unmeasured || f.uncertainty > ASSESS_UNCERTAINTY ? 'assessment' : 'training';
-  return { utility, reasons, mode };
+  return { utility, reasons, mode, plateau };
 }
 
 export function generateDailyPlan(
@@ -123,8 +148,8 @@ export function generateDailyPlan(
   now: number,
   previous?: DailyPlan,
 ): DailyPlan {
-  const ctx: Context = { now, sessions, goals, prefs, twin };
   const profile = currentProfile(twin, now);
+  const ctx: Context = { now, sessions, goals, prefs, twin, asymmetry: detectAsymmetry(profile) };
   const scored = profile
     .map((p) => ({ p, ...scoreDimension(p, ctx) }))
     .sort((a, b) => b.utility - a.utility);
@@ -141,12 +166,48 @@ export function generateDailyPlan(
     minutes += m;
   }
 
+  // Asymmetric mind: the plan must cover both ends of the split, each at its own difficulty.
+  const asym = ctx.asymmetry ?? null;
+  if (asym) {
+    for (const dim of [asym.strong, asym.weak]) {
+      if (items.some((i) => i.dimension === dim)) continue;
+      const p = profile.find((x) => x.id === dim)!;
+      const item = createPlanItem(p, ctx);
+      const keep = asym.strong === dim ? asym.weak : asym.strong;
+      if (items.length >= 4) {
+        // Replace the lowest-utility item that is not the other end of the split.
+        let idx = -1;
+        for (let k = items.length - 1; k >= 0; k--) {
+          if (items[k].dimension !== keep) {
+            idx = k;
+            break;
+          }
+        }
+        if (idx < 0) continue;
+        minutes -= items[idx].minutes;
+        items.splice(idx, 1);
+      }
+      items.push(item);
+      minutes += item.minutes;
+    }
+  }
+
   const names = items.map((i) => getDimension(i.dimension).short);
   const assess = items.filter((i) => i.mode === 'assessment').length;
+  const formatted = items.filter((i) => i.format && i.format !== 'standard' && i.reasons.some((r) => r.factor === 'plateau'));
+  const split = asym ? items.filter((i) => i.dimension === asym.strong || i.dimension === asym.weak) : [];
   const rationale =
     `${items.length} activit${items.length === 1 ? 'y' : 'ies'}, about ${Math.round(minutes)} min: ${names.join(', ')}. ` +
     `Top priority: ${names[0]} — ${lowerFirst(items[0].reasons[0]?.text ?? 'highest utility')}.` +
-    (assess ? ` Includes ${assess} short check-in${assess > 1 ? 's' : ''} to sharpen uncertain parts of your profile.` : '');
+    (assess ? ` Includes ${assess} short check-in${assess > 1 ? 's' : ''} to sharpen uncertain parts of your profile.` : '') +
+    (formatted.length
+      ? ` New format${formatted.length > 1 ? 's' : ''} to break a plateau: ${formatted.map((i) => `${getDimension(i.dimension).short} → ${TRAINING_FORMATS[i.format!].name}`).join(', ')}.`
+      : '') +
+    (split.length
+      ? ` Asymmetric profile, so difficulty is set per area, never averaged: ${split
+          .map((i) => `${getDimension(i.dimension).short} ${i.mode === 'training' ? `${TIER_LABEL[i.tier ?? 'core'].toLowerCase()} (level ${i.level})` : 'check-in'}`)
+          .join(' + ')}.`
+      : '');
 
   return {
     id: uid('plan_'),
@@ -160,13 +221,32 @@ export function generateDailyPlan(
 
 /** Build any requested activity, including dimensions outside the daily top four. */
 export function createPlanItem(p: DimensionProfile, ctx: Context): PlanItem {
-  const { mode, utility, reasons } = scoreDimension(p, ctx);
+  const { mode, utility, reasons, plateau } = scoreDimension(p, ctx);
   const task = taskForDimension(p.id);
-  return {
+  // Difficulty comes from THIS dimension's estimate and tier — never from a profile average.
+  const tier = tierFor(p);
+  const item: PlanItem = {
     id: uid('pi_'), dimension: p.id, taskId: task.id, mode,
-    level: mode === 'assessment' ? 0 : levelForSuccess(p.belief, TARGET_SUCCESS[ctx.prefs.challenge], task),
+    level: 0,
     minutes: estimateMinutes(task, mode), utility: Math.round(utility * 1000) / 1000, reasons,
+    tier,
   };
+  if (mode === 'training') {
+    const targetSuccess = tierTarget(ctx.prefs.challenge, tier);
+    item.targetSuccess = targetSuccess;
+    const asym = asymmetryOf(ctx);
+    if (plateau) {
+      item.format = nextFormat(ctx.sessions, p.id);
+      item.formatNote = `${TRAINING_FORMATS[item.format].name}: ${lowerFirst(TRAINING_FORMATS[item.format].description)} Chosen because the estimate has been flat for ${plateau.sessions} sessions.`;
+      if (item.format === 'strategy') item.strategyKey = nextStrategy(ctx.sessions, p.id);
+    } else if (asym?.strong === p.id && tier === 'advanced') {
+      item.format = 'stretch';
+      item.formatNote = `${TRAINING_FORMATS.stretch.name}: your strongest area trains past the comfort zone (about ${Math.round(STRETCH_FORMAT_TARGET * 100)} % success).`;
+    }
+    const target = item.format === 'stretch' ? Math.min(targetSuccess, STRETCH_FORMAT_TARGET) : targetSuccess;
+    item.level = levelForSuccess(p.belief, target, task);
+  }
+  return item;
 }
 
 export function diffPlans(previous: DailyPlan, next: PlanItem[]): string[] {
@@ -182,6 +262,12 @@ export function diffPlans(previous: DailyPlan, next: PlanItem[]): string[] {
         item.mode === 'training'
           ? `${name} switched from check-in to training — the profile is now confident enough to train at the right level.`
           : `${name} switched to a check-in — its estimate became uncertain again.`,
+      );
+    else if (item.mode === 'training' && (before.format ?? 'standard') !== (item.format ?? 'standard'))
+      changes.push(
+        item.format && item.format !== 'standard'
+          ? `${name} switched to the ${TRAINING_FORMATS[item.format].name} format — ${item.reasons.some((r) => r.factor === 'plateau') ? 'its estimate has plateaued' : 'it is your strongest area'}.`
+          : `${name} is back to the standard format.`,
       );
     else if (item.mode === 'training' && before.level !== item.level && before.level > 0)
       changes.push(`${name} level ${before.level} → ${item.level} to keep you near your target success rate.`);

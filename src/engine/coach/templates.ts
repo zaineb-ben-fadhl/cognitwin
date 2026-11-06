@@ -8,6 +8,7 @@
  */
 import { AFFECT_LABEL } from '../affect';
 import { getDimension } from '../dimensions';
+import { isMashedSession } from '../quality';
 import { hashSeed, uid } from '../rng';
 import type { Confidence, Insight, SessionRecord } from '../types';
 import type { CoachAction, CoachMessage } from './types';
@@ -56,6 +57,7 @@ export function narrateInsight(i: Insight): string {
         : `${lead} Dips are normal: sleep, stress and time of day all move scores. One calm session usually tells us more than one number.`;
     }
     case 'stable':
+      if (i.title.endsWith('with a wider range')) return `${i.title} (${ev}). One rushed session can't rewrite your profile — a calm one will tighten it again.`;
       return `${i.title} (${ev}). Stable estimates are useful too — they make the profile more precise.`;
     case 'speed_accuracy':
       return `${h}speed is costing you accuracy (${ev}). ${tip ?? 'A tiny pause before answering is cheaper than an error.'}`;
@@ -69,8 +71,19 @@ export function narrateInsight(i: Insight): string {
     case 'sequence_order':
     case 'reasoning_rule':
       return `${i.title}${ev ? ` (${ev})` : ''}. ${tip ?? ''}`.trim();
-    case 'plateau':
-      return `${h}${lowerFirst(i.title)} (${ev}). Plateaus are where a new strategy helps most. ${tip ?? 'Try a fresh approach next session.'}`;
+    case 'plateau': {
+      const range = i.evidence[0]?.value;
+      const trend = i.evidence[1]?.value;
+      const next = i.evidence.find((e) => e.label === 'Next format')?.value;
+      return (
+        `${h}${lowerFirst(i.title)}: the estimate moved only ${range ?? 'a little'} over your last sessions${trend ? ` (trend ${trend})` : ''}. ` +
+        `More of the same rarely breaks a plateau, so ${next ? `your plan switches ${dim} to the ${next} format` : 'your plan changes the format'}. ${tip ? `Also worth trying — ${tip}` : ''}`
+      ).trim();
+    }
+    case 'asymmetry': {
+      const [a, b] = i.evidence;
+      return `${i.title}: ${a?.label.replace('Radar · ', '')} ${a?.value} vs ${b?.label.replace('Radar · ', '')} ${b?.value}, and the intervals do not overlap — a real split, not noise. So difficulty is set separately for each area, never averaged: advanced work where you are strong, foundational steps where you are not.`;
+    }
     case 'strength':
       return `${i.title} — ${ev}. Strengths are worth maintaining with a light session now and then.`;
     case 'needs_data':
@@ -81,8 +94,13 @@ export function narrateInsight(i: Insight): string {
       return `${h}${lowerFirst(i.title)} (${ev}). If you can, schedule the harder sessions then.`;
     case 'calibration':
       return `${i.title} (${ev}). Predicting your own score before each session sharpens self-awareness — it is a skill too.`;
-    case 'data_quality':
+    case 'data_quality': {
+      if (i.id.endsWith('-rushing')) {
+        const width = i.evidence.find((e) => e.label === 'Uncertainty after the session')?.value;
+        return `${i.title}: ${i.evidence[0]?.value ?? 'very fast answers'}. I left those answers out instead of reading them as a drop in ability, and marked this session as highly uncertain${width ? ` (${width})` : ''}. Were you distracted, or rushing?`;
+      }
       return `${i.title}: ${i.evidence[0]?.value ?? ''} The profile used it with reduced weight, so one noisy session can't mislead it.`;
+    }
     case 'affect':
       return affectAdvice(i);
     default:
@@ -139,14 +157,15 @@ export function sessionFeedback(session: SessionRecord, insights: Insight[]): Co
   const top = insights.slice(0, 3);
   const delta = session.scoreAfter.score - session.scoreBefore.score;
   const reliable = session.quality.reliability !== 'poor';
-  const headline =
-    session.mode === 'assessment'
+  const headline = isMashedSession(session.quality)
+    ? `${dim.short} ${session.mode === 'assessment' ? 'check-in' : 'session'} flagged as highly uncertain`
+    : session.mode === 'assessment'
       ? `${dim.short} check-in complete`
       : delta >= 2
         ? `Nice session — ${dim.short} is moving up`
         : `${dim.short} session done`;
   const paragraphs = top.map(narrateInsight);
-  paragraphs.push(variant(session.id, MOTIVATION.effort));
+  if (!isMashedSession(session.quality)) paragraphs.push(variant(session.id, MOTIVATION.effort));
   const affect = session.affect.state;
   let action: CoachAction | undefined;
   if (affect === 'fatigued' || affect === 'strained') action = { kind: 'take_break', minutes: 3, label: 'Take a 3-minute break' };

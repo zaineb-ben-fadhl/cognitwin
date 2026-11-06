@@ -11,9 +11,14 @@ import {
   getDimension,
   ensureDimensions,
   generateDailyPlan,
+  isMashedSession,
   localDate,
   replaySessions,
   applySession,
+  applyDispute,
+  buildScenario,
+  makeDispute,
+  removeDispute,
   uid,
   type AIEvent,
   type AIEventType,
@@ -22,6 +27,10 @@ import {
   type CollabDimension,
   type DailyPlan,
   type DimensionId,
+  type DisputeOutcome,
+  type DisputeReason,
+  type ScenarioId,
+  type SessionContext,
   type Goal,
   type SessionRecord,
   type TwinState,
@@ -93,6 +102,8 @@ export interface PersistedState {
   acsWeights: Record<CollabDimension, number>;
   verify: { current: VerifyChallenge | null; history: Array<{ id: string; found: boolean; at: number }> };
   demo: boolean;
+  /** Robustness scenario currently loaded (synthetic data), if any. */
+  scenario?: ScenarioId | null;
   lastPurgeAt: number;
 }
 
@@ -128,6 +139,7 @@ function freshState(now = Date.now()): PersistedState {
     acsWeights: { ...DEFAULT_ACS_WEIGHTS },
     verify: { current: null, history: [] },
     demo: false,
+    scenario: null,
     lastPurgeAt: now,
   };
 }
@@ -150,6 +162,13 @@ interface Actions {
   setAcsWeights(w: Record<CollabDimension, number>): void;
   setVerify(current: VerifyChallenge | null, result?: { found: boolean }): void;
   loadDemo(): void;
+  /** Replace the history with a synthetic robustness scenario (real engine, simulated learner). */
+  loadScenario(id: ScenarioId): void;
+  /** The user contests a session: it counts less and becomes more uncertain. Returns the before/after numbers. */
+  disputeSession(id: string, reason: DisputeReason, opts?: { note?: string; source?: 'chat' | 'button' }): DisputeOutcome | null;
+  undisputeSession(id: string): void;
+  /** The user's explanation of a flagged (rushed) session. */
+  setSessionContext(id: string, context: SessionContext): void;
   clearData(scope: 'all' | 'history' | 'chat' | 'camera' | 'demo'): void;
   purgeExpired(now?: number): number;
   exportData(): ExportFile;
@@ -203,7 +222,7 @@ export const useStore = create<AppState>()(
           ];
           if (session.selfPrediction !== undefined)
             events.push({ id: uid('ev_'), type: 'self_prediction', at: session.endedAt, data: { predicted: session.selfPrediction, actual: Math.round(session.scoreAfter.score) } });
-          if (session.quality.flags.some((f) => f.kind === 'random_responding')) events.push({ id: uid('ev_'), type: 'random_responding', at: session.endedAt });
+          if (isMashedSession(session.quality)) events.push({ id: uid('ev_'), type: 'random_responding', at: session.endedAt });
 
           // Goals reached?
           const profile = currentProfile(twin, session.endedAt);
@@ -334,12 +353,60 @@ export const useStore = create<AppState>()(
           missions: [],
           verify: { current: null, history: [] },
           demo: true,
+          scenario: null,
           onboarded: true,
           calibration: s.calibration ?? { srtMs: 320, factor: 1.08, input: 'mouse', at: now },
           profile: { ...s.profile, nickname: s.profile.nickname || 'Demo' },
           consent: s.consent.acceptedAt ? s.consent : { ...s.consent, acceptedAt: now, log: [...s.consent.log, { at: now, change: 'Demo data loaded (synthetic persona)' }] },
         }));
         getState().ensureTodayPlan(true);
+      },
+
+      loadScenario(id) {
+        const now = Date.now();
+        const data = buildScenario(id, now);
+        setState((s) => ({
+          twin: data.twin,
+          sessions: data.sessions,
+          goals: data.goals,
+          plans: data.plans,
+          events: data.events,
+          chat: [],
+          missions: [],
+          verify: { current: null, history: [] },
+          demo: true,
+          scenario: id,
+          onboarded: true,
+          calibration: s.calibration ?? { srtMs: 320, factor: 1.08, input: 'mouse', at: now },
+          profile: { ...s.profile, nickname: s.profile.nickname || 'Demo' },
+          consent: s.consent.acceptedAt ? s.consent : { ...s.consent, acceptedAt: now, log: [...s.consent.log, { at: now, change: `Robustness scenario loaded (${id}, synthetic data)` }] },
+        }));
+        getState().ensureTodayPlan(true);
+      },
+
+      disputeSession(id, reason, opts = {}) {
+        const s = getState();
+        const now = Date.now();
+        const res = applyDispute({ twin: s.twin, sessions: s.sessions, events: s.events, weights: s.acsWeights }, id, makeDispute(reason, now, opts.source ?? 'button', opts.note), uid('ev_'));
+        if (!res) return null;
+        setState({ twin: ensureDimensions(res.twin, DIMENSION_IDS), sessions: res.sessions, events: [...s.events, res.event] });
+        getState().ensureTodayPlan(true);
+        return res.outcome;
+      },
+
+      undisputeSession(id) {
+        setState((s) => {
+          const { twin, sessions } = removeDispute(s, id);
+          return { twin: ensureDimensions(twin, DIMENSION_IDS), sessions };
+        });
+        getState().ensureTodayPlan(true);
+      },
+
+      setSessionContext(id, context) {
+        setState((s) => ({
+          sessions: s.sessions.map((x) => (x.id === id ? { ...x, context } : x)),
+          events: [...s.events, { id: uid('ev_'), type: 'rush_check_answered', at: Date.now(), data: { answer: context, sessionId: id } }],
+        }));
       },
 
       clearData(scope) {
@@ -368,6 +435,7 @@ export const useStore = create<AppState>()(
             missions: [],
             verify: { current: null, history: [] },
             demo: false,
+            scenario: null,
           };
         });
       },

@@ -1,27 +1,42 @@
-import { ArrowRight, Camera, CameraOff, Info, ShieldCheck } from 'lucide-react';
+import { ArrowRight, Bot, Camera, CameraOff, Info, Lightbulb, MessageSquareWarning, ShieldCheck, Shuffle } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { CoachCard } from '@/components/coach/CoachCard';
 import { DifficultyPath } from '@/components/charts/DifficultyPath';
 import { DimLabel, dimColor } from '@/components/dim';
 import { TaskRunner, type RunResult } from '@/components/tasks/TaskRunner';
-import { Badge, Button, Card, CardHeader, ConfidenceBadge, InfoTip, IntervalBar, Segmented, Toggle } from '@/components/ui';
+import { Badge, Button, Card, CardHeader, ConfidenceBadge, InfoTip, IntervalBar, Modal, Segmented, Toggle } from '@/components/ui';
 import {
   AFFECT_LABEL,
   AdaptiveSession,
+  DISPUTE_LABEL,
+  STRETCH_FORMAT_TARGET,
+  TARGET_SUCCESS,
+  TIER_LABEL,
+  TRAINING_FORMATS,
+  currentProfile,
   findDimension,
   findTask,
   finalizeSession,
+  isMashedSession,
   levelForSuccess,
+  nextStrategy,
+  pushbackReply,
+  rushQuestion,
+  sessionFeedback,
   sessionInsights,
   sessionPrior,
-  TARGET_SUCCESS,
+  tierFor,
+  tierTarget,
   uid,
   type CameraCues,
   type CoachMessage,
+  type DisputeReason,
   type SelfReport,
+  type SessionContext,
   type SessionMode,
   type SessionRecord,
+  type TrainingFormat,
 } from '@/engine';
 import { CameraCueTracker } from '@/lib/camera';
 import { sessionCoach } from '@/lib/coachClient';
@@ -30,6 +45,104 @@ import { useStore } from '@/store';
 import { useCoachContext } from '@/store/derived';
 
 type Stage = 'intro' | 'practice' | 'run' | 'results';
+
+const FORMATS: TrainingFormat[] = ['standard', 'stretch', 'interleaved', 'strategy'];
+
+const RUSH_REPLY: Record<SessionContext, string> = {
+  rushing: 'Thanks for being honest. Nothing is lost: those answers are already out of your estimate. When you have three calm minutes, a short re-check will tighten it again.',
+  distracted: 'That happens. This session counts only a fraction and its uncertainty is widened, so your profile is protected. Try again somewhere quieter — it will sharpen things quickly.',
+  testing: 'Fair enough — poking at the system is a good instinct. The session was caught as rushed and barely moved your estimate.',
+  genuine: 'Thanks. I would still like a second look: answers that fast cannot be based on what was on screen. A calm re-check will tell us more than this one did.',
+};
+
+/** The coach's contextual question after a rushed / random-pressing session. */
+function RushCheckCard({ session }: { session: SessionRecord }) {
+  const setSessionContext = useStore((st) => st.setSessionContext);
+  const live = session.behaviour.rushChecks?.at(-1)?.answer;
+  const [answer, setAnswer] = useState<SessionContext | null>(session.context ?? null);
+  const question = rushQuestion(session);
+  if (!question) return null;
+  const options: Array<[SessionContext, string]> = [
+    ['rushing', 'I was rushing'],
+    ['distracted', 'I was distracted'],
+    ['testing', 'I was testing the app'],
+    ['genuine', 'That was my real level'],
+  ];
+  return (
+    <Card className="border-warning/60">
+      <div className="flex items-start gap-3">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-brand-soft text-brand">
+          <Bot size={17} />
+        </div>
+        <div className="min-w-0 flex-1 space-y-2">
+          <div className="text-[15px] font-semibold">Data flagged as highly uncertain</div>
+          <p className="text-[14px] leading-relaxed">{question}</p>
+          {live && live !== 'continue' && !answer && <p className="text-[12.5px] text-ink-2">During the session you answered “{live === 'rushing' ? 'I was rushing' : live === 'distracted' ? 'I’m distracted' : 'stop here'}”.</p>}
+          {answer ? (
+            <p className="rounded-xl bg-card-2/60 p-3 text-[13.5px]">{RUSH_REPLY[answer]}</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {options.map(([k, label]) => (
+                <Button
+                  key={k}
+                  size="sm"
+                  variant={k === 'rushing' ? 'primary' : 'secondary'}
+                  onClick={() => {
+                    setAnswer(k);
+                    setSessionContext(session.id, k);
+                  }}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+const DISPUTE_OPTIONS: DisputeReason[] = ['distraction', 'noise', 'interruption', 'device', 'fatigue', 'unwell', 'other'];
+
+/** "This doesn't reflect me": the user contests a session, the twin re-weights it. */
+function DisputeDialog({ session, onClose, onDone }: { session: SessionRecord; onClose: () => void; onDone: (m: CoachMessage) => void }) {
+  const disputeSession = useStore((st) => st.disputeSession);
+  const [reason, setReason] = useState<DisputeReason>('distraction');
+  const [note, setNote] = useState('');
+  return (
+    <Modal open onClose={onClose} title="Disagree with this result?">
+      <div className="space-y-4 text-sm">
+        <p className="text-ink-2">
+          Tell the coach what got in the way. The session keeps its data but counts half as much, and the estimate becomes more uncertain — so a calm re-check can settle it. You can undo this later in
+          the Brain Twin session log.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {DISPUTE_OPTIONS.map((r) => (
+            <Button key={r} size="sm" variant={reason === r ? 'primary' : 'secondary'} onClick={() => setReason(r)}>
+              {DISPUTE_LABEL[r].charAt(0).toUpperCase() + DISPUTE_LABEL[r].slice(1)}
+            </Button>
+          ))}
+        </div>
+        <textarea value={note} onChange={(e) => setNote(e.target.value)} maxLength={200} rows={2} placeholder="Optional: what happened?" className="w-full rounded-xl border border-line bg-card px-3 py-2" />
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            onClick={() => {
+              const outcome = disputeSession(session.id, reason, { note: note.trim() || undefined, source: 'button' });
+              onDone(pushbackReply(outcome, reason));
+            }}
+          >
+            Mark as disputed
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
 
 function Scale({ label, value, onChange }: { label: string; value?: number; onChange: (v: number) => void }) {
   return (
@@ -60,22 +173,43 @@ export default function SessionPage() {
   const planItemId = params.get('plan') ?? undefined;
   const queue = (params.get('queue') ?? '').split(',').filter(Boolean);
   const firstTime = !sessions.some((s) => s.taskId === taskId);
+  const reviewId = params.get('review');
+  const reviewed = reviewId ? sessions.find((s) => s.id === reviewId && s.taskId === taskId) : undefined;
+  const planItem = useStore((st) => (planItemId ? st.plans.flatMap((p) => p.items).find((i) => i.id === planItemId) : undefined));
+  // Per-dimension difficulty: tier from THIS dimension's estimate, format from the plan (plateau breaker).
+  const dimProfile = dim ? currentProfile(twin, Date.now()).find((p) => p.id === dim.id) : undefined;
+  const tier = planItem?.tier ?? (dimProfile ? tierFor(dimProfile) : 'core');
+  const urlFormat = params.get('format') as TrainingFormat | null;
+  const format: TrainingFormat = mode === 'training' ? (urlFormat && FORMATS.includes(urlFormat) ? urlFormat : (planItem?.format ?? 'standard')) : 'standard';
+  const baseTarget = mode === 'training' ? (planItem?.targetSuccess ?? tierTarget(settings.challenge, tier)) : undefined;
+  const target = baseTarget === undefined ? undefined : format === 'stretch' ? Math.min(baseTarget, STRETCH_FORMAT_TARGET) : baseTarget;
+  const strategyKey = format === 'strategy' && dim ? (planItem?.strategyKey ?? nextStrategy(sessions, dim.id)) : undefined;
+  const strategy = strategyKey && dim ? dim.strategies.find((x) => x.key === strategyKey) : undefined;
 
-  const [stage, setStage] = useState<Stage>('intro');
+  const [stage, setStage] = useState<Stage>(reviewed ? 'results' : 'intro');
   const [prediction, setPrediction] = useState<number>(50);
   const [predict, setPredict] = useState(settings.askSelfPrediction);
   const [checkIn, setCheckIn] = useState<SelfReport>({});
-  const [practice, setPractice] = useState(firstTime);
+  const [practice, setPractice] = useState(firstTime || tier === 'foundational');
   const [cameraOn, setCameraOn] = useState(consent.camera);
   const [cameraError, setCameraError] = useState<string | null>(null);
-  const [record, setRecord] = useState<SessionRecord | null>(null);
-  const [coach, setCoach] = useState<CoachMessage | null>(null);
+  const [record, setRecord] = useState<SessionRecord | null>(reviewed ?? null);
+  const [coach, setCoach] = useState<CoachMessage | null>(() => {
+    if (!reviewed) return null;
+    const previous = [...sessions].filter((x) => x.dimension === reviewed.dimension && x.endedAt < reviewed.endedAt).at(-1);
+    return sessionFeedback(reviewed, sessionInsights(reviewed, previous));
+  });
+  const [disputing, setDisputing] = useState(false);
+  const [disputeReply, setDisputeReply] = useState<CoachMessage | null>(null);
+  const [reflected, setReflected] = useState<string | null>(null);
+  // Keep the results in sync with the store (a dispute rebuilds the session's posterior).
+  const live = record ? sessions.find((x) => x.id === record.id) : undefined;
   const videoRef = useRef<HTMLVideoElement>(null);
   const tracker = useRef<CameraCueTracker | null>(null);
   const priorRef = useRef(dim ? sessionPrior(twin, dim.id, Date.now()) : { mean: 0, sd: 1.2 });
 
   const adaptive = useMemo(
-    () => (dim && stage === 'run' ? new AdaptiveSession(dim.task, { mode, prior: priorRef.current, challenge: settings.challenge }) : null),
+    () => (dim && stage === 'run' ? new AdaptiveSession(dim.task, { mode, prior: priorRef.current, challenge: settings.challenge, format, targetSuccess: target }) : null),
     // A new adaptive session only when the run starts.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [stage === 'run'],
@@ -119,7 +253,7 @@ export default function SessionPage() {
 
   const task = dim.task;
   const color = dimColor(dim.id);
-  const startLevel = mode === 'training' ? levelForSuccess(priorRef.current, TARGET_SUCCESS[settings.challenge], task) : null;
+  const startLevel = mode === 'training' ? levelForSuccess(priorRef.current, target ?? TARGET_SUCCESS[settings.challenge], task) : null;
   const factor = calibration?.factor ?? 1.15;
 
   const finish = async (res: RunResult, quit: boolean) => {
@@ -147,6 +281,9 @@ export default function SessionPage() {
       camera: camera && camera.samples > 0 ? camera : undefined,
       deadlineFactor: factor,
       planItemId,
+      format,
+      targetSuccess: target,
+      strategyKey,
     });
     const previous = [...sessions].reverse().find((s) => s.dimension === dim.id);
     const insights = sessionInsights(session, previous);
@@ -187,11 +324,45 @@ export default function SessionPage() {
               <p className="mt-0.5">
                 {mode === 'assessment'
                   ? 'Each trial is chosen to be as informative as possible; it stops as soon as the estimate is precise enough (no fixed length).'
-                  : `Starts at level ${startLevel} (${task.levelDescription(startLevel!)}) and keeps you near ${Math.round(TARGET_SUCCESS[settings.challenge] * 100)} % success.`}
+                  : `Starts at level ${startLevel} (${task.levelDescription(startLevel!)}) and keeps you near ${Math.round((target ?? TARGET_SUCCESS[settings.challenge]) * 100)} % success.`}
               </p>
             </div>
           </div>
         </Card>
+
+        {mode === 'training' && (format !== 'standard' || tier !== 'core') && (
+          <Card className="border-brand/50">
+            <div className="flex items-start gap-3">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-brand-soft text-brand">{format === 'strategy' ? <Lightbulb size={16} /> : <Shuffle size={16} />}</span>
+              <div className="min-w-0 flex-1 space-y-1.5 text-[13.5px]">
+                <div className="flex flex-wrap items-center gap-2">
+                  {format !== 'standard' && <Badge tone="brand">{TRAINING_FORMATS[format].name} format</Badge>}
+                  {tier !== 'core' && <Badge tone={tier === 'advanced' ? 'good' : 'warn'}>{TIER_LABEL[tier]} difficulty</Badge>}
+                  {target !== undefined && <span className="text-[12px] text-ink-2">target ≈ {Math.round(target * 100)} % success</span>}
+                </div>
+                {format !== 'standard' && (
+                  <p>
+                    {TRAINING_FORMATS[format].description} <span className="text-ink-2">Why: {TRAINING_FORMATS[format].science}</span>
+                  </p>
+                )}
+                {planItem?.formatNote && <p className="text-ink-2">{planItem.formatNote}</p>}
+                {tier !== 'core' && (
+                  <p className="text-ink-2">
+                    {tier === 'advanced'
+                      ? `${dim.short} is one of your strongest areas, so it trains above your usual comfort zone — difficulty is set from this area alone, not from your average.`
+                      : `${dim.short} starts with foundational steps at its own level — difficulty is set from this area alone, not from your average. A practice round is switched on.`}
+                  </p>
+                )}
+                {strategy && (
+                  <div className="rounded-xl bg-card-2/60 p-3">
+                    <div className="font-semibold">Strategy to try: {strategy.title}</div>
+                    <p className="mt-0.5">{strategy.detail}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </Card>
+        )}
 
         <Card>
           <CardHeader title="Before you start" subtitle="Both are optional — they power the self-awareness and working-state features." />
@@ -288,8 +459,10 @@ export default function SessionPage() {
   }
 
   // ---------------------------------------------------------------- results
-  const s = record!;
+  const s = live ?? record!;
   const delta = s.scoreAfter.score - s.scoreBefore.score;
+  const mashed = isMashedSession(s.quality);
+  const strategyUsed = s.strategyKey ? dim.strategies.find((x) => x.key === s.strategyKey) : undefined;
   const nextTask = queue[0];
   return (
     <div className="space-y-5">
@@ -298,7 +471,7 @@ export default function SessionPage() {
           <div className="flex items-center gap-2 text-[13px] text-ink-2">
             <DimLabel id={dim.id} /> {task.name} · {s.trials.length} trials
           </div>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">{mode === 'assessment' ? 'Check-in complete' : 'Session complete'}</h1>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight">{reviewed ? (s.mode === 'assessment' ? 'Check-in review' : 'Session review') : s.mode === 'assessment' ? 'Check-in complete' : 'Session complete'}</h1>
         </div>
         <div className="flex gap-2">
           {nextTask ? (
@@ -320,7 +493,13 @@ export default function SessionPage() {
         <CardHeader
           title={`${dim.name} estimate`}
           subtitle="Before and after this session, with 80 % intervals"
-          right={<ConfidenceBadge confidence={s.scoreAfter.confidence} />}
+          right={
+            <div className="flex items-center gap-2">
+              {s.dispute && <Badge tone="warn">disputed</Badge>}
+              {mashed && <Badge tone="critical">highly uncertain</Badge>}
+              <ConfidenceBadge confidence={s.scoreAfter.confidence} />
+            </div>
+          }
         />
         <div className="space-y-4">
           {[
@@ -338,12 +517,69 @@ export default function SessionPage() {
         </div>
         <p className="mt-3 text-[13px] text-ink-2">
           {Math.abs(delta) < 2 ? 'The estimate held steady' : `The estimate moved ${delta > 0 ? 'up' : 'down'} by ${Math.abs(Math.round(delta))} points`} and the interval{' '}
-          {s.scoreAfter.hi - s.scoreAfter.lo < s.scoreBefore.hi - s.scoreBefore.lo ? 'narrowed — the twin knows you better now.' : 'stayed similar.'}
+          {s.scoreAfter.hi - s.scoreAfter.lo < s.scoreBefore.hi - s.scoreBefore.lo - 0.5
+            ? 'narrowed — the twin knows you better now.'
+            : s.scoreAfter.hi - s.scoreAfter.lo > s.scoreBefore.hi - s.scoreBefore.lo + 0.5
+              ? 'widened — this session made the twin less sure, by design, because its data is in doubt.'
+              : 'stayed similar.'}
           {s.selfPrediction !== undefined && ` You predicted ${s.selfPrediction} %.`}
         </p>
+        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3 text-[12.5px] text-ink-2">
+          {s.dispute ? (
+            <span>You disputed this session ({DISPUTE_LABEL[s.dispute.reason]}): it counts {Math.round(s.dispute.weightFactor * 100)} % of its usual weight and its uncertainty is widened.</span>
+          ) : (
+            <>
+              <span>Doesn’t reflect you?</span>
+              <Button size="sm" variant="ghost" onClick={() => setDisputing(true)}>
+                <MessageSquareWarning size={14} /> Disagree with this result
+              </Button>
+            </>
+          )}
+        </div>
       </Card>
 
+      {mashed && <RushCheckCard session={s} />}
+      {disputeReply && <CoachCard m={disputeReply} />}
+
+      {strategyUsed && (
+        <Card>
+          <CardHeader title={`Did “${strategyUsed.title}” help?`} icon={<Lightbulb size={16} />} subtitle="Your judgement decides whether the coach keeps suggesting it." />
+          {reflected ? (
+            <p className="text-[13px] text-ink-2">Noted — {reflected === 'yes' ? 'keep using it; the next plateau-breaker will build on it.' : reflected === 'no' ? 'the next strategy-focus session will suggest a different one.' : 'no problem; it will come back another time.'}</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {[
+                ['yes', 'Yes, it helped'],
+                ['no', 'Not really'],
+                ['skipped', 'I didn’t try it'],
+              ].map(([k, label]) => (
+                <Button
+                  key={k}
+                  size="sm"
+                  onClick={() => {
+                    setReflected(k);
+                    logEvent('strategy_reflection', { answer: k, strategy: strategyUsed.key });
+                  }}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
+
       {coach ? <CoachCard m={coach} rate /> : <Card className="text-sm text-ink-2">The coach is reviewing your session…</Card>}
+      {disputing && (
+        <DisputeDialog
+          session={s}
+          onClose={() => setDisputing(false)}
+          onDone={(m) => {
+            setDisputing(false);
+            setDisputeReply(m);
+          }}
+        />
+      )}
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Card>
